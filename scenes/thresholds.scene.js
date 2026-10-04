@@ -45,16 +45,18 @@ function seaUpdate(t,cx,cz){
    vb[o]=x;vb[o+1]=y;vb[o+2]=z;vb[o+3]=nx/l;vb[o+4]=ny/l;vb[o+5]=nz/l;vb[o+6]=sstep(.35,.85,jc)*seaFoam;vb[o+7]=clamp(y/(3*seaAmp+.01)*.5+.5,0,1);}}
  eng.updateMesh(seaM,vb);}
 const seaM=eng.addMesh(seaG);
-const sea=eng.addObject({m:seaM,p:[0,0,0],s:1,rot:[0,0,0],castShadow:false,mat:{a:[.008,.03,.034],m:1,r:.55,mode:'sea'}});
+const sea=eng.addObject({m:seaM,p:[0,0,0],s:1,rot:[0,0,0],castShadow:false,mat:{a:[.007,.028,.032],m:1,r:.55,mode:'sea',anisoDir:[Math.cos(.25),0,Math.sin(.25)]}});
 
 /* ---------- I. monoliths in the storm ---------- */
 const P1=[-40,0,-40],RD=v3.norm([-.82,0,-.57]),PR=[-RD[2],0,RD[0]];      /* first pillar, row direction, its right-hand side */
 const CA=v3.add(v3.add(P1,v3.mul(RD,-78)),v3.mul(PR,-22));CA[1]=4.5;    /* camera start: off the row's left flank */
 const faceN=v3.norm([CA[0]-P1[0],0,CA[2]-P1[2]]);
 const pillarYaw=yawFor(faceN[0],faceN[2]);
-const bronze={a:[.6,.4,.24],m:1,r:.17,mode:'polished',edgeWear:.25,wearColor:[.85,.6,.4]};
+const bronze={a:[.2,.13,.075],m:1,r:.14,mode:'polished',anisotropy:.45,anisoDir:[0,1,0],edgeWear:.4,wearColor:[.95,.7,.45]};
+const sprays=[];
 [[0,64],[46,47],[96,38],[150,31],[208,26],[272,22],[342,19]].forEach(([d,h],i)=>{
- const p=v3.add(P1,v3.mul(RD,d));eng.addObject({m:eng.addMesh(genRoundedBox(5.2,h+14,5.2,.06,3)),p:[p[0],h/2-7,p[2]],s:1,rot:[0,pillarYaw+(i?(rnd()-.5)*.1:0),0],mat:bronze});});
+ const p=v3.add(P1,v3.mul(RD,d));sprays.push(eng.addEmitter({kind:'mist',pos:[p[0],.8,p[2]],count:90,vel:[.5,1.1,.3],life:3.2,spread:[3.4,.6,3.4],size:2.2,gravity:.15,turbulence:.9,color:[.88,.93,.98],alpha:.07,soft:.8,on:false}));
+ eng.addObject({m:eng.addMesh(genRoundedBox(5.6,h+14,5.6,.22,5)),p:[p[0],h/2-7,p[2]],s:1,rot:[0,pillarYaw+(i?(rnd()-.5)*.1:0),0],mat:bronze});});
 
 /* ---------- II. the ring portal ---------- */
 const RC=[-170,27,230],RR=7.2;
@@ -69,6 +71,8 @@ function genRing(R,w,th){const NU=240,NV=28,vb=[],ib=[];
  return weldNormals({vb:new Float32Array(vb),ib:new Uint16Array(ib)});}
 const ring=eng.addObject({m:eng.addMesh(genRing(RR,2.1,1.1)),p:RC.slice(),s:1,rot:[0,0,0],castShadow:false,
  mat:{a:[.58,.47,.42],m:.55,r:.36,edgeWear:.5,wearColor:[1,.8,.7],clearcoat:.25}});
+const lipGlow=eng.addObject({m:eng.addMesh(genRing(RR-1.02,.18,.32)),p:RC.slice(),s:1,rot:[0,0,0],castShadow:false,mat:{a:[.2,.1,.12],m:0,r:.5,emissive:[9,5,6.5]}});
+const motes=eng.addEmitter({kind:'pollen',pos:RC.slice(),count:320,vel:[0,.05,0],life:9,spread:[10,10,3],size:.06,gravity:-.01,turbulence:.35,color:[1,.75,.85],alpha:.9,on:false});
 function genDisc(r,n){const vb=[0,0,0,0,0,1,.5,.5],ib=[];for(let j=0;j<=n;j++){const a=j/n*TAU;vb.push(Math.cos(a)*r,Math.sin(a)*r,0,0,0,1,0,0);}for(let j=0;j<n;j++)ib.push(0,j+1,j+2);return {vb:new Float32Array(vb),ib:new Uint16Array(ib)};}
 const vista=eng.addObject({m:eng.addMesh(genDisc(RR-.55,96)),p:RC.slice(),s:1,rot:[0,0,0],castShadow:false,
  mat:{a:[0,0,0],m:0,r:0,transparent:'vista',writeDepth:true,extents:[RR-.55,RR-.55,1],world:0,intensity:.55,order:0}});
@@ -114,23 +118,30 @@ eng.addObject({m:eng.addMesh(lathe([[0,-.5],[.07,-.45],[.11,-.2],[.12,0],[.11,.1
  eng.addFoliage({geom:genGrassClump(12,4,4),lod:genGrassClump(5,4,3),instances:a.subarray(0,m*8),cell:12,farFrac:.3,
   mat:{stem:[.45,.28,.1],leaf:[.62,.4,.14],leaf2:[.78,.55,.22],leafRough:.6,trans:.6}});}
 
+{const n=9000,a=new Float32Array(n*8);let m=0;
+ for(let i=0;i<n*3&&m<n;i++){const r=Math.sqrt(rnd())*70,an=rnd()*TAU,x=DOOR[0]-18+Math.cos(an)*r,z=DOOR[2]+Math.sin(an)*r;
+  if(Math.hypot(x-DOOR[0],z-DOOR[2])<1.8||Math.hypot(x-WP[0],z-WP[2])<.6)continue;
+  a.set([x,gridH(grid,x,z)-.03,z,1.15+.5*rnd(),rnd()*TAU,(rnd()-.5)*.35,rnd()*TAU,rnd()],m*8);m++;}
+ eng.addFoliage({geom:genFlower('spike',9),instances:a.subarray(0,m*8),cell:12,farFrac:.35,
+  mat:{stem:[.5,.34,.12],leaf:[.55,.38,.14],leaf2:[.68,.48,.18],petal:[.78,.56,.22],petal2:[.88,.68,.3],center:[.8,.6,.25],petalRough:.6,trans:.7}});}
+const groundMist=eng.addEmitter({kind:'mist',pos:[DOOR[0]-12,DOOR[1]+.5,DOOR[2]],count:170,vel:[.08,.02,.03],life:12,spread:[26,.35,20],size:4.5,gravity:0,turbulence:.15,color:[.62,.72,.9],alpha:.11,soft:.9,on:false});
 /* ---------- star dome (night places only) ---------- */
 const dome=eng.addObject({m:eng.addMesh(genSphere(1,48,32)),p:[0,0,0],s:2400,rot:[0,0,0],castShadow:false,
  mat:{a:[0,0,0],m:0,r:0,transparent:'starfield',extents:[1,1,1],intensity:0,order:-1}});
 /* ---------- look per place (switched only while the frame is black, white or cloud) ---------- */
 const LOOK={
- sea:{tod:[17,yawToAz(RD,-35)],clouds:.78,fog:{density:.0032,falloff:.02,rayleigh:.5,mie:.6,g:.75},sky:{moon:false,stars:0,aurora:0},exp:1,amp:1,foam:1,rip:.55},
- portal:{tod:[-20,200],clouds:0,fog:{density:.0006,falloff:.05,rayleigh:.1,mie:.2,g:.7},sky:{moon:false,stars:1,aurora:0},exp:.085,amp:.07,foam:0,rip:.2},
- field:{tod:[-20,200],clouds:0,fog:{density:.0009,falloff:.04,rayleigh:.2,mie:.3,g:.7},sky:{moon:false,stars:1,aurora:0},exp:.085,amp:.07,foam:0,rip:.2}};
+ sea:{tod:[17,yawToAz(RD,-35)],clouds:.78,cshadow:.55,post:{bloom:.05,threshold:1.2,flare:.03,dirt:0,dofMaxCoC:3},fog:{density:.0022,falloff:.02,rayleigh:.5,mie:.45,g:.75,volumetric:.004,volFalloff:.06,volDist:160},sky:{moon:false,stars:0,aurora:0},exp:1,amp:1,foam:1,rip:.55},
+ portal:{tod:[-20,200],clouds:0,cshadow:0,post:{bloom:.075,threshold:1,flare:0,dirt:0,dofMaxCoC:3.5},fog:{density:.0006,falloff:.05,rayleigh:.1,mie:.2,g:.7,volumetric:0},sky:{moon:false,stars:1,aurora:0},exp:.085,amp:.07,foam:0,rip:.2},
+ field:{tod:[-20,200],clouds:0,cshadow:0,post:{bloom:.09,threshold:1,flare:.03,dirt:.03,dofMaxCoC:3.5},fog:{density:.0009,falloff:.04,rayleigh:.2,mie:.3,g:.7,volumetric:0},sky:{moon:false,stars:1,aurora:0},exp:.085,amp:.07,foam:0,rip:.2}};
 function yawToAz(d,off){return Math.atan2(d[2],d[0])/DEG+off;}
 let place='';
 function setPlace(p){if(p===place)return;place=p;const L=LOOK[p];
- eng.setTimeOfDay(L.tod[0],L.tod[1],0);eng.setClouds({coverage:L.clouds});eng.setFog(L.fog);eng.setSky(L.sky);
+ eng.setTimeOfDay(L.tod[0],L.tod[1],0);eng.setClouds({coverage:L.clouds,shadows:L.cshadow});eng.setPost(L.post);eng.setFog(L.fog);eng.setSky(L.sky);
  seaAmp=L.amp;seaFoam=L.foam;sea.mat.r=L.rip;
  const P=p==='portal',F=p==='field';
- falls.forEach(e=>e.on=P);Lin.on=Lrim2.on=Lfall.on=P;Ldoor.on=Lkey.on=F;
+ falls.forEach(e=>e.on=P);motes.on=P;groundMist.on=F;sprays.forEach(e=>e.on=p==='sea');Lin.on=Lrim2.on=Lfall.on=P;Ldoor.on=Lkey.on=F;
  eng.cut();}
-eng.setPost({tone:'agx',look:[1.08,1.15],saturation:1.06,bloom:.06,threshold:1.1,knee:.6,grain:.035,chromatic:.008,vignette:.5,flare:0,dirt:0,dofMaxCoC:3.5,lut:'film',lutStrength:.35});
+eng.setPost({tone:'agx',look:[1.08,1.15],saturation:1.06,bloom:.06,threshold:1.1,knee:.6,grain:.03,chromatic:.006,vignette:.5,flare:0,dirt:0,dofMaxCoC:3.5,lut:'film',lutStrength:.35,contactShadows:.8,motionBlur:.35});
 cam.lens={k1:-.02,k2:0,ca:.005,blades:9,bladeRotation:.2,bubble:.3,streaks:0,astig:.25};
 const FM=()=>window.innerWidth>window.innerHeight?1:.62;
 function gate(){eng.setSensor(window.innerWidth>window.innerHeight?'super35':[18.66,24.89]);cam.letterbox=window.innerWidth>window.innerHeight?2.39:0;}
@@ -153,7 +164,6 @@ const g=(x,z)=>gridH(grid,x,z);
 const FIELD_PATH=[[48,DCn(.45),DCn(-4)],[56,(p=>{p[1]=g(p[0],p[2])+1.6;return p;})(DCn(23)),[DC[0],DC[1]+1.2,DC[2]]],
  [64,(p=>{p[1]=g(p[0],p[2])+1.55;return p;})(v3.add(DCn(13),[0,0,-7])),v3.mul(v3.add(DC,WP),.5)],
  [70,v3.add(WP,[-1.1,1.55,-.55]),v3.add(DC,[0,-.2,0])],[74,DCn(.45),DCn(-4)]];
-const hand=new Handheld({intensity:.25,sway:.7,breath:.5,tremor:.2});
 
 /* ---------- the clock ---------- */
 const LOOP=74;let T=0;
@@ -164,7 +174,8 @@ function step(dt){
  if(p==='sea'){[pos,aim]=path(SEA_PATH,T);lens=T<17?28:28+20*ease((T-17)/5);fs=5.6;}
  else if(p==='portal'){[pos,aim]=path(PORTAL_PATH,T);lens=T<41?32:32-10*ease((T-41)/7);fs=4;}
  else{[pos,aim]=path(FIELD_PATH,T);lens=T<56?20+15*ease((T-48)/8):35;fs=2.8;}
- if(p==='sea'){const bob=Math.sin(T*.9)*.35+Math.sin(T*1.7)*.15;pos=pos.slice();pos[1]+=bob;hand.update(dt,cam,pos,aim);}else{cam.pos=pos;cam.target=aim;}
+ if(p==='sea'){pos=pos.slice();pos[1]+=.12*Math.sin(T*.35);}   /* stabilised: a slow gimbal float, no shake */
+ cam.pos=pos;cam.target=aim;
  cam.focalLength=lens*FM();cam.fstop=fs;cam.focusTarget=p==='field'&&T>50&&T<70?WP.map((v,i)=>i===1?v+1.4:v):aim;
  /* transitions: dark mirror -> black; ring -> white; door clouds -> sky clouds (a soft breath of exposure) */
  const L=LOOK[p];let ex=L.exp;
