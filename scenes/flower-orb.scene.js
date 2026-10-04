@@ -24,33 +24,76 @@ eng.setFog({density:.0011});
 eng.setWind({strength:.25});
 eng.setPost({exposure:1.25,bloom:.08,threshold:.9,knee:.6,saturation:1.3,look:[1.08,1.22],vignette:.38,grain:.015,chromatic:.01,dofMaxCoC:Q.get('dof')==='0'?0:4});
 
-/* ---------- breaking waves + whitewater (the FFT ocean has no breakers) ---------- */
-let sD=0;while(sD<80&&gridH(grid,OX+dir[0]*sD,OZ+dir[1]*sD)>-.25)sD+=.25;   /* distance from the orb to water ~25 cm deep */
-const PROF=[[-9,0],[-7,.12],[-5,.38],[-3.4,.75],[-2.1,1.12],[-1.1,1.38],[-.35,1.5],[.25,1.48],[.7,1.36],[.95,1.18],[.82,1.02],[.55,.86],[.36,.62],[.3,.36],[.42,.14],[.7,0]];
-function genBreaker(L,seg){
- const vb=[],ib=[],np=PROF.length;
- for(let i=0;i<=seg;i++){const u=i/seg,x=(u-.5)*L,env=Math.pow(Math.sin(Math.PI*u),.55),hv=env*(.8+.35*(vn2(u*5.3,1.7)-.3)),lean=1.2*(vn2(u*3.1,8.)-.5);
-  for(let j=0;j<np;j++){const [z,y]=PROF[j];vb.push(x,y*hv,z*(.35+.65*env)+lean,0,0,0,u,j/(np-1));}}
- for(let i=0;i<seg;i++)for(let j=0;j<np-1;j++){const a=i*np+j,b=a+np;ib.push(a,a+1,b,a+1,b+1,b);}
- const g=weldNormals({vb:new Float32Array(vb),ib:new Uint16Array(ib)});
- const n=g.vb.length/8,vb2=new Float32Array(n*16);vb2.set(g.vb);vb2.set(g.vb,n*8);
- for(let i=n;i<2*n;i++){vb2[i*8+3]*=-1;vb2[i*8+4]*=-1;vb2[i*8+5]*=-1;}
- const ib2=new Uint16Array(g.ib.length*2);ib2.set(g.ib);for(let t=0;t<g.ib.length;t+=3){ib2[g.ib.length+t]=g.ib[t]+n;ib2[g.ib.length+t+1]=g.ib[t+2]+n;ib2[g.ib.length+t+2]=g.ib[t+1]+n;}
- return {vb:vb2,ib:ib2};}
-/* yaw so that local +z points toward the shore */
+/* ---------- breaking waves (the FFT ocean has no breakers) ----------
+   Each breaker is a CPU-animated strip: 16-point cross-section blended between four key profiles
+   (0 swell -> 1 steep face -> 2 plunging lip -> 3 collapsed bore), offset along the crest so the break peels.
+   The lip landing throws spray; the bore turns into a whitewater sheet that runs up the sand and drains back. */
+let sD=0;while(sD<80&&gridH(grid,OX+dir[0]*sD,OZ+dir[1]*sD)>-.25)sD+=.25;   /* ~25 cm deep */
+let sW=0;while(sW<80&&gridH(grid,OX+dir[0]*sW,OZ+dir[1]*sW)>0)sW+=.1;       /* still-water line */
+const g15=z=>1.5*Math.exp(-Math.pow(z/2.8,2));
+const KEYS=[
+ [-9,-7,-5,-3.4,-2.1,-1.1,-.35,.4,.9,1.4,1.9,2.4,3,3.8,4.8,6].map(z=>[z,g15(z)]),
+ [[-9,0],[-7,.12],[-5,.38],[-3.4,.75],[-2.1,1.12],[-1.1,1.38],[-.35,1.5],[.25,1.48],[.7,1.36],[.95,1.18],[.82,1.02],[.55,.86],[.36,.62],[.3,.36],[.42,.14],[.7,0]],
+ [[-9,0],[-7,.12],[-5,.36],[-3.4,.7],[-2.1,1.05],[-1.1,1.32],[-.2,1.5],[.9,1.5],[1.9,1.3],[2.6,.95],[2.85,.5],[2.75,.12],[.75,.75],[.4,.45],[.45,.15],[.8,0]],
+ [[-9,0],[-7,.05],[-5,.12],[-3.4,.2],[-2.1,.3],[-1.1,.38],[-.2,.45],[.9,.48],[1.9,.45],[2.6,.38],[3.1,.28],[3.5,.18],[3.8,.12],[4.1,.07],[4.4,.03],[4.8,0]]];
+const NP=16,SEG=90,BL=70,PER=9;
+const sm01=x=>{x=clamp(x,0,1);return x*x*(3-2*x);};
+function profAt(k,j){k=clamp(k,0,3);const a=Math.min(Math.floor(k),2),f=sm01(k-a),A=KEYS[a][j],B=KEYS[a+1][j];return [A[0]+(B[0]-A[0])*f,A[1]+(B[1]-A[1])*f];}
 const shoreYaw=(()=>{let best=0,bd=-9;for(let a=0;a<TAU;a+=.002){const M=m4.model(0,0,0,0,a,0,1),d=-(M[8]*dir[0]+M[10]*dir[1]);if(d>bd){bd=d;best=a;}}return best;})();
-const breakerM=eng.addMesh(genBreaker(70,90));
-const waves=[{ph:0,off:3},{ph:.5,off:-9}].map(w=>({...w,o:eng.addObject({m:breakerM,p:[OX,0,OZ],s:1,sv:[1,1.4,1],rot:[0,shoreYaw,0],castShadow:false,
- mat:{a:[0,0,0],m:0,r:0,mode:7,wave:{h:1.5}}})}));
-const WP=11;   /* seconds per breaker cycle */
+const RM=m4.model(0,0,0,0,shoreYaw,0,1),AX0=[RM[0],RM[1],RM[2]],AX2=[RM[8],RM[9],RM[10]];
+const toWorld=(p,x,y,z)=>[p[0]+AX0[0]*x+AX2[0]*z,p[1]+y,p[2]+AX0[2]*x+AX2[2]*z];
+const ENV=[],JIT=[];for(let i=0;i<=SEG;i++){const u=i/SEG;ENV.push(Math.pow(Math.sin(Math.PI*u),.55)*(.8+.35*(vn2(u*5.3,1.7)-.3)));JIT.push(1.2*(vn2(u*3.1,8.)-.5));}
+function breakerVB(vb,kG,amp,peel){
+ const n=(SEG+1)*NP;
+ for(let i=0;i<=SEG;i++){const u=i/SEG,x=(u-.5)*BL,env=ENV[i],k=kG+peel*(u-.5)+.15*(vn2(u*7,3)-.5);
+  for(let j=0;j<NP;j++){const [z,y]=profAt(k,j),o=(i*NP+j)*8;vb[o]=x;vb[o+1]=y*env*amp;vb[o+2]=z*(.35+.65*env)+JIT[i];vb[o+6]=u;vb[o+7]=j/(NP-1);}}
+ /* grid normals (central differences), then a flipped copy for the back side */
+ for(let i=0;i<=SEG;i++)for(let j=0;j<NP;j++){const o=(i*NP+j)*8,P=(a,b)=>{a=clamp(a,0,SEG);b=clamp(b,0,NP-1);const q=(a*NP+b)*8;return [vb[q],vb[q+1],vb[q+2]];};
+  const du=v3.sub(P(i+1,j),P(i-1,j)),dv=v3.sub(P(i,j+1),P(i,j-1));let nn=v3.cross(dv,du);const l=Math.hypot(nn[0],nn[1],nn[2])||1;
+  vb[o+3]=nn[0]/l;vb[o+4]=nn[1]/l;vb[o+5]=nn[2]/l;}
+ vb.copyWithin(n*8,0,n*8);for(let i=n;i<2*n;i++){vb[i*8+3]*=-1;vb[i*8+4]*=-1;vb[i*8+5]*=-1;}}
+function breakerMesh(){const n=(SEG+1)*NP,vb=new Float32Array(n*16),ib=[];
+ for(let i=0;i<SEG;i++)for(let j=0;j<NP-1;j++){const a=i*NP+j,b=a+NP;ib.push(a,a+1,b,a+1,b+1,b);}
+ const m=ib.length;for(let t=0;t<m;t+=3)ib.push(ib[t]+n,ib[t+2]+n,ib[t+1]+n);
+ breakerVB(vb,0,.3,.5);return {vb,ib:new Uint16Array(ib)};}
+/* whitewater sheet: a terrain-following grid rebuilt each frame, local z toward the shore */
+const WX=40,WZ=14;
+function sheetMesh(){const vb=new Float32Array((WX+1)*(WZ+1)*8),ib=[];
+ for(let i=0;i<WX;i++)for(let j=0;j<WZ;j++){const a=i*(WZ+1)+j,b=a+WZ+1;ib.push(a,b,a+1,a+1,b,b+1);}return {vb,ib:new Uint16Array(ib)};}
+function sheetVB(vb,c,L){
+ for(let i=0;i<=WX;i++)for(let j=0;j<=WZ;j++){const x=(i/WX-.5)*BL*.85,z=(j/WZ-.5)*L,w=toWorld(c,x,0,z),o=(i*(WZ+1)+j)*8;
+  vb[o]=x;vb[o+1]=Math.max(gridH(grid,w[0],w[2]),0)+.035;vb[o+2]=z;vb[o+3]=0;vb[o+4]=1;vb[o+5]=0;vb[o+6]=i/WX;vb[o+7]=j/WZ;}}
+const waves=[{ph:0,off:3,peel:.6},{ph:.5,off:-9,peel:-.5}].map(w=>{
+ const g=breakerMesh(),m=eng.addMesh(g),sg=sheetMesh(),sm=eng.addMesh(sg);
+ return {...w,vb:g.vb,m,svb:sg.vb,sm,
+  o:eng.addObject({m,p:[OX,-.05,OZ],s:1,sv:[1,1.4,1],rot:[0,shoreYaw,0],castShadow:false,mat:{a:[0,0,0],m:0,r:0,mode:7,wave:{h:1.5}}}),
+  so:eng.addObject({m:sm,p:[OX,0,OZ],s:1,rot:[0,shoreYaw,0],castShadow:false,mat:{a:[1,1,1],m:0,r:0,mode:0,glass:{foam:true,aTop:0,aBot:6,backfaces:false}}})};});
+const lerpP=(p,pts)=>{for(let i=1;i<pts.length;i++)if(p<=pts[i][0]){const [p0,v0]=pts[i-1],[p1,v1]=pts[i];return v0+(v1-v0)*sm01((p-p0)/(p1-p0));}return pts[pts.length-1][1];};
+let lastT=0;
 function updateWaves(t){
- for(const w of waves){const p=((t/WP+w.ph)%1+1)%1,o=w.o,d=sD+17-p*11;
-  o.p=[OX+dir[0]*d+side[0]*w.off,-.05,OZ+dir[1]*d+side[1]*w.off];
-  const h=.16+.84*Math.pow(Math.sin(Math.PI*Math.min(p*1.15,1)),.8);o.sv=[1,1.55*h,.75+.4*h];
-  o.mat.r=sstep(.5,.95,p);o.mat.m=t;}}
-{const W=18,g={vb:new Float32Array([-45,0,-W/2,0,1,0,0,0, 45,0,-W/2,0,1,0,1,0, 45,0,W/2,0,1,0,1,1, -45,0,W/2,0,1,0,0,1]),ib:new Uint16Array([0,2,1,0,3,2])};
- const d=sD+6;eng.addObject({m:eng.addMesh(g),p:[OX+dir[0]*d,.06,OZ+dir[1]*d],s:1,rot:[0,shoreYaw,0],castShadow:false,
-  mat:{a:[1,1,1],m:0,r:0,mode:0,glass:{foam:true,aTop:.9,aBot:W,backfaces:false}}});}
+ const dt=clamp(t-lastT,0,.1);lastT=t;
+ for(const w of waves){const p=((t/PER+w.ph)%1+1)%1;
+  /* breaker: k (shape), amp (height), d (distance offshore from the orb) */
+  const k=p<.55?Math.pow(p/.55,1.6):p<.68?1+(p-.55)/.13:p<.82?2+(p-.68)/.14:3;
+  const amp=p<.55?.32+.68*sm01(p/.5):p<.82?1:Math.max(0,1-(p-.82)/.12);
+  const d=lerpP(p,[[0,sD+20],[.6,sD+8.5],[.82,sD+5.5],[.95,sD+1.5],[1,sD+1.5]]);
+  const c=[OX+dir[0]*d+side[0]*w.off,-.05,OZ+dir[1]*d+side[1]*w.off];
+  w.o.p=c;breakerVB(w.vb,k,amp,w.peel);eng.updateMesh(w.m,w.vb);
+  w.o.mat.r=sm01((p-.55)/.2);w.o.mat.m=t;
+  /* spray where the lip lands (k ~ 2) and mist while it collapses */
+  if(dt>0&&amp>.2)for(let i=2;i<SEG;i+=4){const u=i/SEG,kk=k+w.peel*(u-.5);
+   if(kk>1.8&&kk<2.4&&Math.random()<dt*(kk<2.2?26:10)){const [z,y]=profAt(kk,10),pw=toWorld(c,(u-.5)*BL,y*ENV[i]*amp*1.4,z*(.35+.65*ENV[i])+JIT[i]);
+    eng.spawnParticles(0,[pw[0],Math.max(pw[1],.15),pw[2]],5+3*Math.random(),9,1.2,[-dir[0]*2.4,2.2,-dir[1]*2.4],3.2);}
+   else if(kk>2.4&&kk<2.95&&Math.random()<dt*8){const [z,y]=profAt(kk,8),pw=toWorld(c,(u-.5)*BL,y*ENV[i]*amp*1.4,z*(.35+.65*ENV[i])+JIT[i]);
+    eng.spawnParticles(0,[pw[0],Math.max(pw[1],.1),pw[2]],3,5,1.6,[-dir[0]*1.5,1,-dir[1]*1.5],3.6);}}
+  /* whitewater: bore -> run-up onto the sand -> backwash */
+  const pp=p<.3?p+1:p;let F,L,a;
+  if(pp<.62){a=0;F=d;L=4;}
+  else if(pp<.95){F=lerpP(pp,[[.62,sD+5.5],[.82,sD+2.5],[.95,sW]]);L=lerpP(pp,[[.62,3],[.8,8],[.95,7]]);a=sm01((pp-.62)/.06);}
+  else if(pp<1.1){const q=(pp-.95)/.15;F=sW-3.4*Math.sin(q*Math.PI/2);L=7-3.5*q;a=1-.25*q;}
+  else{const q=(pp-1.1)/.2;F=sW-3.4+(3.9)*sm01(q);L=3.5-1.5*q;a=.75*(1-q);}
+  const sc=[OX+dir[0]*(F+L/2)+side[0]*w.off,0,OZ+dir[1]*(F+L/2)+side[1]*w.off];
+  w.so.p=sc;sheetVB(w.svb,sc,L);eng.updateMesh(w.sm,w.svb);w.so.mat.glass.aTop=a;w.so.mat.glass.aBot=L;}}
 
 /* ---------- glass orb + water ---------- */
 const R=.22,CY=OH+R*.86,FILL=-.32;           /* sphere radius (m), centre height (sunk a little into the sand), water line in local units */
