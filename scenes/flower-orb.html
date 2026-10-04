@@ -781,7 +781,44 @@ void main(){
  if(vWP.y<uClipY)discard;
  vec3 N=normalize(vN);vec3 V=normalize(uCam-vWP);
  vec3 alb=uAlbedo;float m=uMetal,r=uRough,hb=0.,bs=0.;
- if(uMode==5||uMode==6){
+ if(uMode==7){
+  /* breaking wave body (opaque). local: x along crest, y up (crest height uGlass.y), z toward shore.
+     uRough = foam amount (collapse phase), uMetal = time for foam drift */
+  if(dot(N,V)<0.)N=-N;
+  float Hc=max(uGlass.y,.1),hy=clamp(vLocal.y/Hc,0.,1.2),front=smoothstep(-.6,.3,vLocal.z);
+  vec2 fp=vec2(vLocal.x*.9,vLocal.y*2.2-uMetal*1.3);
+  float rip=vn(vLocal.xz*3.1+vec2(0.,uMetal*.7))*.6+vn(vLocal.xz*9.+uMetal)*.4;
+  N=bumpN(N,vWP,rip*.08,1.);
+  float NoV=max(dot(N,V),1e-3);float Fr=.02+.98*pow(1.-NoV,5.);
+  vec3 deepC=vec3(.004,.05,.045),lightC=vec3(.03,.62,.48);
+  float thin=pow(hy,1.6)*front;                       /* the upper front face is thin water: light passes through */
+  vec3 sky=envLod(vec3(0.,1.,0.),6.);
+  vec3 body=mix(deepC,lightC,thin)*(sky*1.1+uSunColor*.18);
+  body+=lightC*uSunColor*pow(max(dot(-V,uSunDir),0.),3.)*thin*.9;
+  vec3 col=body*(1.-Fr)+envLod(reflect(-V,N),.6)*Fr;
+  col+=uSunColor*pow(max(dot(N,normalize(V+uSunDir)),0.),300.)*4.*sunShadow(vWP,N,max(dot(N,uSunDir),0.),vViewZ);
+  /* foam: lip + crest, whitewater at the base of the face, sparse streaks on the back, all growing with collapse */
+  float fn=vn(fp*1.7)*.55+vn(fp*5.3)*.3+vn(fp*14.)*.15;
+  float lip=smoothstep(.78,.98,hy)*smoothstep(-.2,.4,vLocal.z);
+  float base=(1.-smoothstep(.0,.48,hy))*front;
+  float back=(1.-front)*smoothstep(.55,.95,vn(vLocal.xz*vec2(1.2,4.)+uMetal*.2))*.5;
+  float fa=clamp((lip*1.25+base*1.1+back)*(.6+uRough)+uRough*.55*front*hy,0.,1.);
+  float foam=smoothstep(.62-fa*.55,.75-fa*.5,fn+fa*.35);
+  vec3 foamC=vec3(.95)*(sky*1.2+uSunColor*max(dot(N,uSunDir),0.)*.35+uSunColor*.12);
+  col=mix(col,foamC,foam);
+  o=vec4(applyFog(col,vWP),1.);return;}
+ if(uMode==5||uMode==6||uMode==8){
+  if(uMode==8){
+   /* whitewater sheet (transparent): drifting foam patches + lace; uRough = time, uGlass.y = strength, local z toward shore */
+   vec2 q=vLocal.xz;float t=uRough;
+   vec2 dq=q-vec2(0.,t*.9);
+   float n=vn(dq*.7)*.5+vn(dq*2.1)*.3+vn(dq*6.5)*.2;
+   vec2 wl=worley(dq*1.3);float lace=1.-smoothstep(0.,.12,wl.y-wl.x);
+   float zz=vLocal.z/max(uGlass.z,.01);float band=smoothstep(-.5,-.3,zz)*(1.-smoothstep(.3,.5,zz));
+   float a=clamp((smoothstep(.32,.58,n)*.95+lace*.6*smoothstep(.2,.5,n))*band*uGlass.y,0.,1.);
+   vec3 sky=envLod(vec3(0.,1.,0.),6.);
+   vec3 c=vec3(.93)*(sky*1.15+uSunColor*max(uSunDir.y,0.)*.4+uSunColor*.1);
+   o=vec4(applyFog(c*a,vWP),a);return;}
   /* transparent pass only (premultiplied). 5 = solid/hollow glass: Fresnel reflection + lens image through a sphere
      (uGlassC = centre, radius), alpha uGlass.y/.z above/below local y uGlass.x; 6 = tinted liquid with in-scatter glow */
   if(dot(N,V)<0.)N=-N;
@@ -844,7 +881,7 @@ S.absorbFS=`
 in vec3 vWP;in vec3 vN;in vec3 vLocal;in float vViewZ;
 uniform sampler2D uHeight;uniform vec2 uHm;uniform vec3 uCam;
 layout(location=0) out vec4 o;
-const vec3 ABSORB=vec3(.45,.09,.04);
+const vec3 ABSORB=vec3(.50,.065,.10);
 void main(){
  float depth=max(0.,-texture(uHeight,vWP.xz*uHm.x+uHm.y).r);
  vec3 V=normalize(uCam-vWP);
@@ -854,7 +891,7 @@ S.waterFS=`
 in vec3 vWP;in vec3 vN;in vec3 vLocal;in float vViewZ;
 uniform sampler2D uHeight,uWv0,uWv1,uWv2,uWv3,uSim,uFoam;uniform vec2 uHm;uniform vec4 uWL,uSimWin,uFoamWin;uniform float uTime,uPixel;uniform vec4 uRipple[8];
 layout(location=0) out vec4 o;
-const vec3 ABS=vec3(.34,.085,.05);
+const vec3 ABS=vec3(.40,.062,.085);
 float bedH(vec2 p){return texture(uHeight,p*uHm.x+uHm.y).r;}
 vec3 seabed(vec2 p,float fp){
  float n2=vn(p*.9)*.6+vn(p*2.3)*.4;
@@ -2101,7 +2138,9 @@ function setLightUniforms(p){
  p.v4('uPatchRect',PATCH.cx,PATCH.cz,PATCH.size*.47,PATCH.rectOn).v4('uPatch',PATCH.cx,PATCH.cz,PATCH.size,0);
  p.v4('uSimWin',SIM.win[0],SIM.win[1],SIM.win[2],SIM.ok?1:0).v4('uSandWin',SAND.win[0],SAND.win[1],SAND.win[2],1);
  p.f('uTime',time).f('uCOn',CAUSTON).f('uCL',WAVE_L[0]).v4('uWL',WAVE_L[0],WAVE_L[1],WAVE_L[2],WAVE_L[3]).f('uPixel',2*Math.tan(cam.fov/2)/R.h).f('uClipY',CV.clip).f('uUseRefl',CV.useRefl).m('uMirrorVP',F.VPm);}
-function objModel(o){const r=o.rot,sp=o.spin;return m4.model(o.p[0],o.p[1],o.p[2],r[0]+(sp?sp[0]*time:0),r[1]+(sp?sp[1]*time:0),r[2],o.s);}
+function objModel(o){const r=o.rot,sp=o.spin,M=m4.model(o.p[0],o.p[1],o.p[2],r[0]+(sp?sp[0]*time:0),r[1]+(sp?sp[1]*time:0),r[2],o.s);
+ if(o.sv)for(let c=0;c<3;c++)for(let i=0;i<3;i++)M[c*4+i]*=o.sv[c];   /* optional per-axis scale */
+ return M;}
 function lodMesh(o){if(!o.lods)return o.m;const d=Math.hypot(o.p[0]-cam.pos[0],o.p[1]-cam.pos[1],o.p[2]-cam.pos[2]),ld=o.lodDist||[16,40];const k=d<ld[0]?0:(d<ld[1]?1:2);o.lodNow=k;return o.lods[Math.min(k,o.lods.length-1)];}
 function allObjects(){const l=objects.map(o=>({m:lodMesh(o),ms:o.lods?o.lods[o.lods.length-1]:o.m,model:objModel(o),mat:o.mat,glass:o.mat.glass,o,noShadow:o.castShadow===false}));
  for(const b of physics.balls){const bm=BALL_MATS[b.mat];l.push({m:meshes.sphere,model:m4.model(b.p[0],b.p[1],b.p[2],0,0,0,b.r),mat:{a:bm.a,m:bm.m,r:bm.r,mode:0}});}
@@ -2164,7 +2203,7 @@ function drawWorld(objs,mir){
  if(skirt)drawMesh(skirt);
  if(PATCH.on){const q=P.terrainPatch;setLightUniforms(q);q.i('uTerrainMode',0).f('uPatchOn',1);gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(-2,-2);drawMesh(PATCH.mesh);gl.disable(gl.POLYGON_OFFSET_FILL);}
  p=P.pbr;setLightUniforms(p);
- for(const o of objs){if(o.glass)continue;p.m('uModel',o.model).v3('uAlbedo',o.mat.a[0],o.mat.a[1],o.mat.a[2]).f('uMetal',o.mat.m).f('uRough',o.mat.r).i('uMode',o.mat.mode);drawMesh(o.m);}
+ for(const o of objs){if(o.glass)continue;p.m('uModel',o.model).v3('uAlbedo',o.mat.a[0],o.mat.a[1],o.mat.a[2]).f('uMetal',o.mat.m).f('uRough',o.mat.r).i('uMode',o.mat.mode);if(o.mat.wave)p.v4('uGlass',0,o.mat.wave.h,0,0);drawMesh(o.m);}
  gl.disable(gl.CULL_FACE);
  for(const it of instanced){if(mir&&!it.mirror)continue;p=P[it.prog];setLightUniforms(p);const g=(mir&&it.lod)?it.lod:it.main;gl.bindVertexArray(g.vao);gl.drawElementsInstanced(gl.TRIANGLES,g.count,g.type,0,Math.floor(it.n*it.density(tier)));}
  if(!mir&&foliage.length){p=P.foliage;setLightUniforms(p);foliageUniforms(p);const test=c=>visible(pl,c.c,c.r);
@@ -2208,7 +2247,7 @@ function drawGlass(objs){
  const cp=cam.pos,dd=o=>-Math.hypot(o.model[12]-cp[0],o.model[13]-cp[1],o.model[14]-cp[2]);gs.sort((a,b)=>dd(a)-dd(b));
  const p=P.pbr;setLightUniforms(p);gl.depthFunc(gl.LESS);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.enable(gl.CULL_FACE);
  const one=(o,face,k)=>{const g=o.glass,c=o.model;
-  p.m('uModel',o.model).v3('uAlbedo',o.mat.a[0],o.mat.a[1],o.mat.a[2]).f('uMetal',0).f('uRough',.02).i('uMode',g.liquid?6:5)
+  p.m('uModel',o.model).v3('uAlbedo',o.mat.a[0],o.mat.a[1],o.mat.a[2]).f('uMetal',0).f('uRough',g.foam?time:.02).i('uMode',g.foam?8:(g.liquid?6:5))
    .v4('uGlass',g.fill===undefined?-9:g.fill,(g.aTop||0)*k,(g.aBot===undefined?g.aTop||0:g.aBot)*k,g.ior||1.5).v4('uGlassC',c[12],c[13],c[14],o.o.s*(g.r||1));
   gl.cullFace(face);drawMesh(o.m);};
  for(const o of gs)if(!o.glass.liquid&&o.glass.backfaces!==false)one(o,gl.FRONT,.4);
@@ -2331,13 +2370,41 @@ let seed=777;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/42949
 const grid=buildGrid(islandH);eng.setTerrain(grid,{mode:'island'});
 const ANG=.7,dir=[Math.cos(ANG),Math.sin(ANG)],side=[-dir[1],dir[0]];
 const pad=findBeachPad(grid,ANG);
-let k=0;while(k<40&&gridH(grid,pad[0]+dir[0]*k,pad[1]+dir[1]*k)>1.0)k+=.25;   /* dry sand a few metres above the swash */
+let k=0;while(k<40&&gridH(grid,pad[0]+dir[0]*k,pad[1]+dir[1]*k)>.7)k+=.25;   /* dry sand a few metres above the swash */
 const OX=pad[0]+dir[0]*k,OZ=pad[1]+dir[1]*k,OH=gridH(grid,OX,OZ);
 eng.setFocusArea(OX,OZ,OX+dir[0]*16,OZ+dir[1]*16);
 eng.setClouds({coverage:.62});
 eng.setFog({density:.0011});
 eng.setWind({strength:.25});
-eng.setPost({exposure:1.25,bloom:.08,threshold:.9,knee:.6,saturation:1.3,look:[1.08,1.22],vignette:.38,grain:.015,chromatic:.01,dofMaxCoC:Q.get('dof')==='0'?0:7});
+eng.setPost({exposure:1.25,bloom:.08,threshold:.9,knee:.6,saturation:1.3,look:[1.08,1.22],vignette:.38,grain:.015,chromatic:.01,dofMaxCoC:Q.get('dof')==='0'?0:4});
+
+/* ---------- breaking waves + whitewater (the FFT ocean has no breakers) ---------- */
+let sD=0;while(sD<80&&gridH(grid,OX+dir[0]*sD,OZ+dir[1]*sD)>-.25)sD+=.25;   /* distance from the orb to water ~25 cm deep */
+const PROF=[[-9,0],[-7,.12],[-5,.38],[-3.4,.75],[-2.1,1.12],[-1.1,1.38],[-.35,1.5],[.25,1.48],[.7,1.36],[.95,1.18],[.82,1.02],[.55,.86],[.36,.62],[.3,.36],[.42,.14],[.7,0]];
+function genBreaker(L,seg){
+ const vb=[],ib=[],np=PROF.length;
+ for(let i=0;i<=seg;i++){const u=i/seg,x=(u-.5)*L,env=Math.pow(Math.sin(Math.PI*u),.55),hv=env*(.8+.35*(vn2(u*5.3,1.7)-.3)),lean=1.2*(vn2(u*3.1,8.)-.5);
+  for(let j=0;j<np;j++){const [z,y]=PROF[j];vb.push(x,y*hv,z*(.35+.65*env)+lean,0,0,0,u,j/(np-1));}}
+ for(let i=0;i<seg;i++)for(let j=0;j<np-1;j++){const a=i*np+j,b=a+np;ib.push(a,a+1,b,a+1,b+1,b);}
+ const g=weldNormals({vb:new Float32Array(vb),ib:new Uint16Array(ib)});
+ const n=g.vb.length/8,vb2=new Float32Array(n*16);vb2.set(g.vb);vb2.set(g.vb,n*8);
+ for(let i=n;i<2*n;i++){vb2[i*8+3]*=-1;vb2[i*8+4]*=-1;vb2[i*8+5]*=-1;}
+ const ib2=new Uint16Array(g.ib.length*2);ib2.set(g.ib);for(let t=0;t<g.ib.length;t+=3){ib2[g.ib.length+t]=g.ib[t]+n;ib2[g.ib.length+t+1]=g.ib[t+2]+n;ib2[g.ib.length+t+2]=g.ib[t+1]+n;}
+ return {vb:vb2,ib:ib2};}
+/* yaw so that local +z points toward the shore */
+const shoreYaw=(()=>{let best=0,bd=-9;for(let a=0;a<TAU;a+=.002){const M=m4.model(0,0,0,0,a,0,1),d=-(M[8]*dir[0]+M[10]*dir[1]);if(d>bd){bd=d;best=a;}}return best;})();
+const breakerM=eng.addMesh(genBreaker(70,90));
+const waves=[{ph:0,off:3},{ph:.5,off:-9}].map(w=>({...w,o:eng.addObject({m:breakerM,p:[OX,0,OZ],s:1,sv:[1,1.4,1],rot:[0,shoreYaw,0],castShadow:false,
+ mat:{a:[0,0,0],m:0,r:0,mode:7,wave:{h:1.5}}})}));
+const WP=11;   /* seconds per breaker cycle */
+function updateWaves(t){
+ for(const w of waves){const p=((t/WP+w.ph)%1+1)%1,o=w.o,d=sD+17-p*11;
+  o.p=[OX+dir[0]*d+side[0]*w.off,-.05,OZ+dir[1]*d+side[1]*w.off];
+  const h=.16+.84*Math.pow(Math.sin(Math.PI*Math.min(p*1.15,1)),.8);o.sv=[1,1.55*h,.75+.4*h];
+  o.mat.r=sstep(.5,.95,p);o.mat.m=t;}}
+{const W=18,g={vb:new Float32Array([-45,0,-W/2,0,1,0,0,0, 45,0,-W/2,0,1,0,1,0, 45,0,W/2,0,1,0,1,1, -45,0,W/2,0,1,0,0,1]),ib:new Uint16Array([0,2,1,0,3,2])};
+ const d=sD+6;eng.addObject({m:eng.addMesh(g),p:[OX+dir[0]*d,.06,OZ+dir[1]*d],s:1,rot:[0,shoreYaw,0],castShadow:false,
+  mat:{a:[1,1,1],m:0,r:0,mode:0,glass:{foam:true,aTop:.9,aBot:W,backfaces:false}}});}
 
 /* ---------- glass orb + water ---------- */
 const R=.22,CY=OH+R*.86,FILL=-.32;           /* sphere radius (m), centre height (sunk a little into the sand), water line in local units */
@@ -2406,11 +2473,12 @@ for(const [lat,back,sc,yaw] of [[.42,.05,.05,.5],[-.36,-.42,.045,-.4]]){
   mat:{a:[1,.35,.62],m:0,r:.05,mode:0,glass:{aTop:.82,aBot:.82,ior:1.5,r:.6}}});}
 
 /* ---------- camera: low, close, shallow focus on the orb, sea behind ---------- */
-cam.fov=38*DEG;cam.fstop=1.8;cam.bokehScale=Q.get('dof')==='0'?0:2.4;
+cam.fov=38*DEG;cam.fstop=1.8;cam.bokehScale=Q.get('dof')==='0'?0:1.25;
 const rig={mode:'film',yaw:0,pitch:0,dist:1.7};
 function setMode(m){rig.mode=m;$('bMode').textContent=m==='film'?'Film':'Free';}
 const tgt=[OX,CY,OZ];
 function update(dt,t){
+ updateWaves(t);
  let yaw=Math.atan2(dir[1],dir[0])+Math.PI+.05,pit=.10,d=rig.dist;
  const asp=cv.width/Math.max(cv.height,1);if(asp>1.2)d*=.85;
  if(rig.mode==='film'){yaw+=.10*Math.sin(t*.07);pit+=.025*Math.sin(t*.05);}

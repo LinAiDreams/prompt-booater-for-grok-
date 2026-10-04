@@ -16,13 +16,41 @@ let seed=777;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/42949
 const grid=buildGrid(islandH);eng.setTerrain(grid,{mode:'island'});
 const ANG=.7,dir=[Math.cos(ANG),Math.sin(ANG)],side=[-dir[1],dir[0]];
 const pad=findBeachPad(grid,ANG);
-let k=0;while(k<40&&gridH(grid,pad[0]+dir[0]*k,pad[1]+dir[1]*k)>1.0)k+=.25;   /* dry sand a few metres above the swash */
+let k=0;while(k<40&&gridH(grid,pad[0]+dir[0]*k,pad[1]+dir[1]*k)>.7)k+=.25;   /* dry sand a few metres above the swash */
 const OX=pad[0]+dir[0]*k,OZ=pad[1]+dir[1]*k,OH=gridH(grid,OX,OZ);
 eng.setFocusArea(OX,OZ,OX+dir[0]*16,OZ+dir[1]*16);
 eng.setClouds({coverage:.62});
 eng.setFog({density:.0011});
 eng.setWind({strength:.25});
-eng.setPost({exposure:1.25,bloom:.08,threshold:.9,knee:.6,saturation:1.3,look:[1.08,1.22],vignette:.38,grain:.015,chromatic:.01,dofMaxCoC:Q.get('dof')==='0'?0:7});
+eng.setPost({exposure:1.25,bloom:.08,threshold:.9,knee:.6,saturation:1.3,look:[1.08,1.22],vignette:.38,grain:.015,chromatic:.01,dofMaxCoC:Q.get('dof')==='0'?0:4});
+
+/* ---------- breaking waves + whitewater (the FFT ocean has no breakers) ---------- */
+let sD=0;while(sD<80&&gridH(grid,OX+dir[0]*sD,OZ+dir[1]*sD)>-.25)sD+=.25;   /* distance from the orb to water ~25 cm deep */
+const PROF=[[-9,0],[-7,.12],[-5,.38],[-3.4,.75],[-2.1,1.12],[-1.1,1.38],[-.35,1.5],[.25,1.48],[.7,1.36],[.95,1.18],[.82,1.02],[.55,.86],[.36,.62],[.3,.36],[.42,.14],[.7,0]];
+function genBreaker(L,seg){
+ const vb=[],ib=[],np=PROF.length;
+ for(let i=0;i<=seg;i++){const u=i/seg,x=(u-.5)*L,env=Math.pow(Math.sin(Math.PI*u),.55),hv=env*(.8+.35*(vn2(u*5.3,1.7)-.3)),lean=1.2*(vn2(u*3.1,8.)-.5);
+  for(let j=0;j<np;j++){const [z,y]=PROF[j];vb.push(x,y*hv,z*(.35+.65*env)+lean,0,0,0,u,j/(np-1));}}
+ for(let i=0;i<seg;i++)for(let j=0;j<np-1;j++){const a=i*np+j,b=a+np;ib.push(a,a+1,b,a+1,b+1,b);}
+ const g=weldNormals({vb:new Float32Array(vb),ib:new Uint16Array(ib)});
+ const n=g.vb.length/8,vb2=new Float32Array(n*16);vb2.set(g.vb);vb2.set(g.vb,n*8);
+ for(let i=n;i<2*n;i++){vb2[i*8+3]*=-1;vb2[i*8+4]*=-1;vb2[i*8+5]*=-1;}
+ const ib2=new Uint16Array(g.ib.length*2);ib2.set(g.ib);for(let t=0;t<g.ib.length;t+=3){ib2[g.ib.length+t]=g.ib[t]+n;ib2[g.ib.length+t+1]=g.ib[t+2]+n;ib2[g.ib.length+t+2]=g.ib[t+1]+n;}
+ return {vb:vb2,ib:ib2};}
+/* yaw so that local +z points toward the shore */
+const shoreYaw=(()=>{let best=0,bd=-9;for(let a=0;a<TAU;a+=.002){const M=m4.model(0,0,0,0,a,0,1),d=-(M[8]*dir[0]+M[10]*dir[1]);if(d>bd){bd=d;best=a;}}return best;})();
+const breakerM=eng.addMesh(genBreaker(70,90));
+const waves=[{ph:0,off:3},{ph:.5,off:-9}].map(w=>({...w,o:eng.addObject({m:breakerM,p:[OX,0,OZ],s:1,sv:[1,1.4,1],rot:[0,shoreYaw,0],castShadow:false,
+ mat:{a:[0,0,0],m:0,r:0,mode:7,wave:{h:1.5}}})}));
+const WP=11;   /* seconds per breaker cycle */
+function updateWaves(t){
+ for(const w of waves){const p=((t/WP+w.ph)%1+1)%1,o=w.o,d=sD+17-p*11;
+  o.p=[OX+dir[0]*d+side[0]*w.off,-.05,OZ+dir[1]*d+side[1]*w.off];
+  const h=.16+.84*Math.pow(Math.sin(Math.PI*Math.min(p*1.15,1)),.8);o.sv=[1,1.55*h,.75+.4*h];
+  o.mat.r=sstep(.5,.95,p);o.mat.m=t;}}
+{const W=18,g={vb:new Float32Array([-45,0,-W/2,0,1,0,0,0, 45,0,-W/2,0,1,0,1,0, 45,0,W/2,0,1,0,1,1, -45,0,W/2,0,1,0,0,1]),ib:new Uint16Array([0,2,1,0,3,2])};
+ const d=sD+6;eng.addObject({m:eng.addMesh(g),p:[OX+dir[0]*d,.06,OZ+dir[1]*d],s:1,rot:[0,shoreYaw,0],castShadow:false,
+  mat:{a:[1,1,1],m:0,r:0,mode:0,glass:{foam:true,aTop:.9,aBot:W,backfaces:false}}});}
 
 /* ---------- glass orb + water ---------- */
 const R=.22,CY=OH+R*.86,FILL=-.32;           /* sphere radius (m), centre height (sunk a little into the sand), water line in local units */
@@ -91,11 +119,12 @@ for(const [lat,back,sc,yaw] of [[.42,.05,.05,.5],[-.36,-.42,.045,-.4]]){
   mat:{a:[1,.35,.62],m:0,r:.05,mode:0,glass:{aTop:.82,aBot:.82,ior:1.5,r:.6}}});}
 
 /* ---------- camera: low, close, shallow focus on the orb, sea behind ---------- */
-cam.fov=38*DEG;cam.fstop=1.8;cam.bokehScale=Q.get('dof')==='0'?0:2.4;
+cam.fov=38*DEG;cam.fstop=1.8;cam.bokehScale=Q.get('dof')==='0'?0:1.25;
 const rig={mode:'film',yaw:0,pitch:0,dist:1.7};
 function setMode(m){rig.mode=m;$('bMode').textContent=m==='film'?'Film':'Free';}
 const tgt=[OX,CY,OZ];
 function update(dt,t){
+ updateWaves(t);
  let yaw=Math.atan2(dir[1],dir[0])+Math.PI+.05,pit=.10,d=rig.dist;
  const asp=cv.width/Math.max(cv.height,1);if(asp>1.2)d*=.85;
  if(rig.mode==='film'){yaw+=.10*Math.sin(t*.07);pit+=.025*Math.sin(t*.05);}
