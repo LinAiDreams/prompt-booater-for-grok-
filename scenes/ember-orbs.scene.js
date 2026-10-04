@@ -116,22 +116,54 @@ eng.setPost({tone:'agx',look:[1.15,1.2],saturation:1.12,curve:.22,bloom:.05,thre
  dofMaxCoC:Q.get('dof')==='0'?0:9,lut:'warm',lutStrength:.25,contactShadows:.9,exposure:+(Q.get('exp')||.008)});
 cam.fstop=3.5;cam.bokehScale=Q.get('dof')==='0'?0:2.6;cam.breathing=.3;cam.shutterAngle=180;
 cam.lens={k1:-.02,k2:0,ca:.008,blades:9,bladeRotation:.25,bubble:.55,streaks:0,astig:.35};
-let T=+(Q.get('t')||0);
-function frameCam(dt){T+=dt;const wide=window.innerWidth>window.innerHeight,k=Math.sin(T*.11),k2=Math.sin(T*.07+1);
+/* ---------- free camera: orbit / zoom / pan layered on top of the scripted shot ----------
+   drag = orbit, pinch or wheel = zoom, two-finger drag or right/shift-drag = pan, double-tap = back to the cinematic shot */
+function makeOrbit(canvas,o){
+ const st={yaw:0,pitch:0,zoom:1,pan:[0,0,0],cur:{yaw:0,pitch:0,zoom:1,pan:[0,0,0]},touched:false,last:0};
+ const ptr=new Map();let pinch0=0,zoom0=1,mid0=null,lastTap=0;
+ const minZ=o.minZoom||.35,maxZ=o.maxZoom||3,floorY=o.floorY===undefined?.02:o.floorY;
+ const reset=()=>{st.yaw=0;st.pitch=0;st.zoom=1;st.pan=[0,0,0];st.touched=false;if(o.onReset)o.onReset();};
+ const touch=()=>{if(!st.touched&&o.onTouch)o.onTouch();st.touched=true;};
+ let basis=null;   /* camera right/up of the last frame, for screen-space panning */
+ function panBy(dx,dy,dist){if(!basis)return;const k=dist*.0016;for(let i=0;i<3;i++)st.pan[i]+=(-basis.r[i]*dx+basis.u[i]*dy)*k;}
+ canvas.addEventListener('contextmenu',e=>e.preventDefault());
+ canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);ptr.set(e.pointerId,{x:e.clientX,y:e.clientY,b:e.button,sh:e.shiftKey});
+  if(ptr.size===2){const [a,b]=[...ptr.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);zoom0=st.zoom;mid0=[(a.x+b.x)/2,(a.y+b.y)/2];}
+  const now=performance.now();if(ptr.size===1&&now-lastTap<300)reset();lastTap=now;});
+ canvas.addEventListener('pointermove',e=>{const p=ptr.get(e.pointerId);if(!p)return;const dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;
+  if(ptr.size===1){if(Math.abs(dx)+Math.abs(dy)<.5)return;touch();
+   if(p.b===2||p.sh)panBy(dx,dy,st.dist||1);else{st.yaw-=dx*.006;st.pitch=clamp(st.pitch+dy*.005,-1.2,1.2);}}
+  else if(ptr.size===2){touch();const [a,b]=[...ptr.values()],d=Math.max(Math.hypot(a.x-b.x,a.y-b.y),1),m=[(a.x+b.x)/2,(a.y+b.y)/2];
+   st.zoom=clamp(zoom0*pinch0/d,minZ,maxZ);panBy(m[0]-mid0[0],m[1]-mid0[1],st.dist||1);mid0=m;}});
+ const up=e=>ptr.delete(e.pointerId);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+ canvas.addEventListener('wheel',e=>{e.preventDefault();touch();st.zoom=clamp(st.zoom*(1+e.deltaY*.0012),minZ,maxZ);},{passive:false});
+ /* apply(cam, dt): call right after the scripted shot has set cam.pos / cam.target */
+ st.apply=(cam,dt)=>{const c=st.cur,k=1-Math.exp(-dt*10);
+  c.yaw+=(st.yaw-c.yaw)*k;c.pitch+=(st.pitch-c.pitch)*k;c.zoom+=(st.zoom-c.zoom)*k;for(let i=0;i<3;i++)c.pan[i]+=(st.pan[i]-c.pan[i])*k;
+  const tg=v3.add(cam.target,c.pan),v=v3.sub(cam.pos,cam.target),r=v3.len(v)*c.zoom;
+  let az=Math.atan2(v[2],v[0])+c.yaw,el=clamp(Math.asin(clamp(v[1]/Math.max(v3.len(v),1e-6),-1,1))+c.pitch,-.2,1.45);
+  let p=[tg[0]+r*Math.cos(el)*Math.cos(az),tg[1]+r*Math.sin(el),tg[2]+r*Math.cos(el)*Math.sin(az)];
+  p[1]=Math.max(p[1],floorY);cam.pos=p;cam.target=tg;st.dist=r;
+  const f=v3.norm(v3.sub(tg,p)),rr=v3.norm(v3.cross(f,[0,1,0])),uu=v3.cross(rr,f);basis={r:rr,u:uu};};
+ st.reset=reset;return st;}
+
+let T=+(Q.get('t')||0),drift=true;
+const orbit=makeOrbit($('c'),{minZoom:.3,maxZoom:3.2,floorY:.03,onTouch:()=>{drift=false;$('bMode').textContent='Cinematic';},onReset:()=>{drift=true;$('bMode').textContent='Focus: orb';}});
+function frameCam(dt){if(drift)T+=dt;const wide=window.innerWidth>window.innerHeight,k=Math.sin(T*.11),k2=Math.sin(T*.07+1);
  cam.fov=(wide?17.5:28)*DEG;const d=wide?1.42:1.6;
  cam.pos=[.07+.04*k,.37+.01*k2,d];cam.target=[.045+.015*k,.1,0];cam.focusTarget=[C[0],C[1],C[2]+R*.7];
  Lhot.intensity=4*(1+.06*Math.sin(T*3.1)+.04*Math.sin(T*7.7));}   /* embers breathe */
 
 
 /* ---------- HUD ---------- */
-$('top').textContent='';$('bMode').textContent='Focus: orb';
-let focusBack=false;$('bMode').onclick=()=>{focusBack=!focusBack;$('bMode').textContent=focusBack?'Focus: back':'Focus: orb';};
+$('top').textContent='Drag: orbit   Pinch/scroll: zoom   Two fingers: pan   Double-tap: reset';$('bMode').textContent='Focus: orb';
+let focusBack=false;$('bMode').onclick=()=>{if(orbit.touched){orbit.reset();return;}focusBack=!focusBack;$('bMode').textContent=focusBack?'Focus: back':'Focus: orb';};
 const _fc=frameCam;
 $('bTime').textContent='Pause';let paused=false;$('bTime').onclick=()=>{paused=!paused;eng.pause(paused);$('bTime').textContent=paused?'Play':'Pause';};
 let qi=0;const QM=['auto',0,1,2],QN=['Auto','Low','Med','High'];
 $('bQ').onclick=()=>{qi=(qi+1)%4;eng.setQuality(QM[qi]);$('bQ').textContent=QN[qi];};
 $('bSnd').onclick=()=>{$('bSnd').textContent=eng.audio.toggle()?'Sound on':'Sound off';};
-eng.start(dt=>{_fc(dt);if(focusBack)cam.focusTarget=C2;});
+eng.start(dt=>{_fc(dt);orbit.apply(cam,dt);if(focusBack)cam.focusTarget=C2;});
 if(Q.has('q')){qi=+Q.get('q')+1;eng.setQuality(+Q.get('q'),Q.has('scale')?+Q.get('scale'):undefined);$('bQ').textContent=QN[qi];}
 eng.frozen=Q.has('freeze');window.__eng=eng;
 })();

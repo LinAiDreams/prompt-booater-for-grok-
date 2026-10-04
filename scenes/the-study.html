@@ -3561,6 +3561,12 @@ const box=(w,h,d,r)=>eng.addMesh(r?genRoundedBox(w,h,d,r,3):genBox(w,h,d));
 eng.addObject({m:box(16,14,.2),p:[0,7,-.1],s:1,rot:[0,0,0],castShadow:false,mat:{a:[1,1,1],m:0,r:.9,mode:'projwall',modelA:1}});
 eng.addObject({m:eng.addMesh(genPlaneGrid(16,8)),p:[0,0,6],s:1,rot:[0,0,0],castShadow:false,mat:{a:[1,1,1],m:0,r:.5,mode:'floorpool'}});
 const dark={a:[.025,.02,.018],m:0,r:.6};
+/* the rest of the room, so the free camera never sees past the set */
+const plaster={a:[.32,.3,.27],m:0,r:.9};
+eng.addObject({m:box(.2,14,16),p:[-6,7,7],s:1,rot:[0,0,0],castShadow:false,mat:plaster});
+eng.addObject({m:box(.2,14,16),p:[6,7,7],s:1,rot:[0,0,0],castShadow:false,mat:plaster});
+eng.addObject({m:box(12.4,14,.2),p:[0,7,14],s:1,rot:[0,0,0],castShadow:false,mat:plaster});
+eng.addObject({m:box(12.4,.2,16),p:[0,10,7],s:1,rot:[0,0,0],castShadow:false,mat:plaster});
 eng.addObject({m:box(.42,.3,.03),p:[2.25,1.62,.02],s:1,rot:[0,0,0],mat:{a:[.02,.02,.02],m:0,r:.4}});            /* picture frame */
 eng.addObject({m:box(.32,.22,.02),p:[2.25,1.62,.035],s:1,rot:[0,0,0],mat:{a:[.16,.15,.13],m:0,r:.8}});
 eng.addObject({m:box(.08,.12,.02),p:[-2.15,1.58,.01],s:1,rot:[0,0,0],mat:{a:[.2,.2,.19],m:0,r:.5}});            /* light switch */
@@ -3608,9 +3614,42 @@ function frameCam(t){const k=.5-.5*Math.cos(Math.min(t/60,1)*Math.PI);
  const wide=window.innerWidth>window.innerHeight;
  /* solved from the reference: projection top at the frame top, desk top at 69%, baseboard at 78%, rug edge at 94% */
  cam.fov=(wide?52:65.4)*DEG;cam.pos=[0,1.11,6.78-.4*k];cam.target=[0,1.11+Math.tan(9.76*DEG)*6.78,0];cam.focusTarget=[FX,1.2,FZ];}
-let T=0;eng.start(dt=>{T+=dt;frameCam(T);});
+/* ---------- free camera: orbit / zoom / pan layered on top of the scripted shot ----------
+   drag = orbit, pinch or wheel = zoom, two-finger drag or right/shift-drag = pan, double-tap = back to the cinematic shot */
+function makeOrbit(canvas,o){
+ const st={yaw:0,pitch:0,zoom:1,pan:[0,0,0],cur:{yaw:0,pitch:0,zoom:1,pan:[0,0,0]},touched:false,last:0};
+ const ptr=new Map();let pinch0=0,zoom0=1,mid0=null,lastTap=0;
+ const minZ=o.minZoom||.35,maxZ=o.maxZoom||3,floorY=o.floorY===undefined?.02:o.floorY;
+ const reset=()=>{st.yaw=0;st.pitch=0;st.zoom=1;st.pan=[0,0,0];st.touched=false;if(o.onReset)o.onReset();};
+ const touch=()=>{if(!st.touched&&o.onTouch)o.onTouch();st.touched=true;};
+ let basis=null;   /* camera right/up of the last frame, for screen-space panning */
+ function panBy(dx,dy,dist){if(!basis)return;const k=dist*.0016;for(let i=0;i<3;i++)st.pan[i]+=(-basis.r[i]*dx+basis.u[i]*dy)*k;}
+ canvas.addEventListener('contextmenu',e=>e.preventDefault());
+ canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);ptr.set(e.pointerId,{x:e.clientX,y:e.clientY,b:e.button,sh:e.shiftKey});
+  if(ptr.size===2){const [a,b]=[...ptr.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);zoom0=st.zoom;mid0=[(a.x+b.x)/2,(a.y+b.y)/2];}
+  const now=performance.now();if(ptr.size===1&&now-lastTap<300)reset();lastTap=now;});
+ canvas.addEventListener('pointermove',e=>{const p=ptr.get(e.pointerId);if(!p)return;const dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;
+  if(ptr.size===1){if(Math.abs(dx)+Math.abs(dy)<.5)return;touch();
+   if(p.b===2||p.sh)panBy(dx,dy,st.dist||1);else{st.yaw-=dx*.006;st.pitch=clamp(st.pitch+dy*.005,-1.2,1.2);}}
+  else if(ptr.size===2){touch();const [a,b]=[...ptr.values()],d=Math.max(Math.hypot(a.x-b.x,a.y-b.y),1),m=[(a.x+b.x)/2,(a.y+b.y)/2];
+   st.zoom=clamp(zoom0*pinch0/d,minZ,maxZ);panBy(m[0]-mid0[0],m[1]-mid0[1],st.dist||1);mid0=m;}});
+ const up=e=>ptr.delete(e.pointerId);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+ canvas.addEventListener('wheel',e=>{e.preventDefault();touch();st.zoom=clamp(st.zoom*(1+e.deltaY*.0012),minZ,maxZ);},{passive:false});
+ /* apply(cam, dt): call right after the scripted shot has set cam.pos / cam.target */
+ st.apply=(cam,dt)=>{const c=st.cur,k=1-Math.exp(-dt*10);
+  c.yaw+=(st.yaw-c.yaw)*k;c.pitch+=(st.pitch-c.pitch)*k;c.zoom+=(st.zoom-c.zoom)*k;for(let i=0;i<3;i++)c.pan[i]+=(st.pan[i]-c.pan[i])*k;
+  const tg=v3.add(cam.target,c.pan),v=v3.sub(cam.pos,cam.target),r=v3.len(v)*c.zoom;
+  let az=Math.atan2(v[2],v[0])+c.yaw,el=clamp(Math.asin(clamp(v[1]/Math.max(v3.len(v),1e-6),-1,1))+c.pitch,-.2,1.45);
+  let p=[tg[0]+r*Math.cos(el)*Math.cos(az),tg[1]+r*Math.sin(el),tg[2]+r*Math.cos(el)*Math.sin(az)];
+  p[1]=Math.max(p[1],floorY);cam.pos=p;cam.target=tg;st.dist=r;
+  const f=v3.norm(v3.sub(tg,p)),rr=v3.norm(v3.cross(f,[0,1,0])),uu=v3.cross(rr,f);basis={r:rr,u:uu};};
+ st.reset=reset;return st;}
+
+let T=0,drift=true;
+const orbit=makeOrbit($('c'),{minZoom:.12,maxZoom:1.6,floorY:.15,onTouch:()=>{drift=false;$('bMode').textContent='Cinematic';},onReset:()=>{drift=true;$('bMode').textContent='Reset';}});
+eng.start(dt=>{if(drift)T+=dt;frameCam(T);orbit.apply(cam,dt);});
 if(Q.has('t'))T=+Q.get('t');
-$('top').textContent='';$('bMode').textContent='Reset';$('bMode').onclick=()=>{T=0;};
+$('top').textContent='Drag: orbit   Pinch/scroll: zoom   Two fingers: pan   Double-tap: reset';$('bMode').textContent='Reset';$('bMode').onclick=()=>{if(orbit.touched)orbit.reset();else T=0;};
 $('bTime').textContent='Pause';let paused=false;$('bTime').onclick=()=>{paused=!paused;eng.pause(paused);$('bTime').textContent=paused?'Play':'Pause';};
 let qi=0;const QM=['auto',0,1,2],QN=['Auto','Low','Med','High'];
 $('bQ').onclick=()=>{qi=(qi+1)%4;eng.setQuality(QM[qi]);$('bQ').textContent=QN[qi];};
