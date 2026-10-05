@@ -158,7 +158,9 @@ function wallUpdate(t){const vb=wallG.vb;let Hs=1;
    const ty=PY[j1]-PY[j0],tz=PZ[j1]-PZ[j0],tl=Math.hypot(ty,tz)||1;
    vb[o]=x;vb[o+1]=PY[j];vb[o+2]=PZ[j];vb[o+3]=0;vb[o+4]=-tz/tl;vb[o+5]=ty/tl;
    vb[o+6]=x+900;vb[o+7]=j/WY*pr.H;
-   const q=o+WN*8;vb[q]=vb[o];vb[q+1]=vb[o+1];vb[q+2]=vb[o+2];vb[q+3]=0;vb[q+4]=-vb[o+4];vb[q+5]=-vb[o+5];vb[q+6]=vb[o+6]+10000;vb[q+7]=vb[o+7];}}
+   /* back sheet sits one water-thickness behind the front: a thick lip that thins to a torn edge at the tip */
+   const sl=Math.max(j/WY-FC,0)/(1-FC),thk=j/WY<FC?8:pr.H*.07*Math.pow(1-sl,.8)+.3;
+   const q=o+WN*8;vb[q]=vb[o];vb[q+1]=vb[o+1]-vb[o+4]*thk;vb[q+2]=vb[o+2]-vb[o+5]*thk;vb[q+3]=0;vb[q+4]=-vb[o+4];vb[q+5]=-vb[o+5];vb[q+6]=vb[o+6]+10000;vb[q+7]=vb[o+7];}}
  eng.updateMesh(wallM,vb);const pc=profile(XP,t);wall.mat.modelA=pc.H;wall.mat.modelB=clamp(pc.b*.35+pc.c*.9,0,1);
  wall.p=[0,t>TB+TP+9?-200:0,0];}
 /* where the lip lands (centre column), when */
@@ -199,7 +201,9 @@ function floodUpdate(t){const vb=floodG.vb,zf=zF(t);
 
 /* ---------- spray and splashes ---------- */
 const crestSpray=[];for(let k=0;k<7;k++)crestSpray.push(eng.addEmitter({kind:'smoke',pos:[0,0,0],count:160,vel:[0,6,14],life:7,spread:[130,10,14],size:22,gravity:-1.5,turbulence:.5,growth:2.2,color:[.78,.8,.82],alpha:.32,soft:.9,windFollow:.5}));
-const boreMist=[eng.addEmitter({kind:'smoke',pos:[0,0,0],count:220,vel:[0,3.5,6],life:4,spread:[45,1.5,8],size:6,gravity:-.4,turbulence:.6,growth:1.8,color:[.78,.76,.7],alpha:.32,soft:.9}),
+/* spray streaming off the lip as it throws and falls */
+const lipSpray=[];for(let k=0;k<5;k++)lipSpray.push(eng.addEmitter({kind:'smoke',pos:[0,0,0],count:220,vel:[0,3,16],life:3.2,spread:[95,4,4],size:6,gravity:6,turbulence:.5,growth:1.6,color:[.88,.9,.9],alpha:.2,soft:2,on:false}));
+const boreMist=[eng.addEmitter({kind:'smoke',pos:[0,0,0],count:220,vel:[0,3.5,6],life:4,spread:[45,1.5,8],size:6,gravity:-.4,turbulence:.6,growth:1.8,color:[.78,.76,.7],alpha:.22,soft:.9}),
  eng.addEmitter({kind:'sparks',pos:[0,0,0],count:500,vel:[0,5,7],life:1.6,spread:[40,1,6],size:.05,gravity:9,turbulence:.3,color:[.85,.84,.8],alpha:1,stretch:.06})];
 /* one-shot bursts (engine 'burst' emitters: every particle born once inside the spawn window) */
 const bursts=[];
@@ -215,7 +219,7 @@ const impactMist=eng.addEmitter({kind:'smoke',pos:[XP,15,ZP-20],count:240,vel:[0
 const hits=[];for(const b of blocks){const zf=b.z+b.d/2;if(zf<ZP+4||zf>0)continue;let t=TI;while(zF(t)<zf&&t<LOOP)t+=.02;
  hits.push({t,pos:[b.x,1,zf+1],b});burst(t,[b.x,1,zf+1.5],{kind:'smoke',count:260,vel:[0,24,3],life:5,spread:[b.w*.5,1,1.5],size:7,gravity:7,turbulence:.6,growth:2.2,color:[.82,.8,.76],alpha:.55,soft:1.5,win:.8});}
 /* ... and into the building under the window: a curtain of spray rises past the glass */
-burst(TA-.05,[0,1,9],{kind:'smoke',count:420,vel:[0,27,2.5],life:5,spread:[42,1,1.2],size:6,gravity:8,turbulence:.7,growth:2.4,color:[.84,.82,.78],alpha:.38,soft:1,win:.9});
+burst(TA-.05,[0,1,9],{kind:'smoke',count:420,vel:[0,27,2.5],life:5,spread:[42,1,1.2],size:6,gravity:8,turbulence:.7,growth:2.4,color:[.84,.82,.78],alpha:.26,soft:1,win:.9});
 burst(TA,[0,1,9],{kind:'sparks',count:1400,vel:[0,26,5],life:3,spread:[40,1,1],size:.08,gravity:9.8,turbulence:.3,color:[.86,.85,.82],alpha:.5,stretch:.05,win:.9});
 
 /* ---------- debris swept by the flood ---------- */
@@ -240,11 +244,12 @@ function vehiclesUpdate(t,dt){
 function debrisUpdate(t){for(const d of debris){const z=d.z0+(t-TI)*11*d.sp,lv=floodLevel(d.x,z,t);
  if(t<TI||lv<.2||z>40){d.o.p=[0,-50,0];continue;}d.o.p=[d.x+2*Math.sin(t*.7+d.ph),lv+.05,z];d.o.rot=[.3*Math.sin(t*1.9+d.ph),t*.6+d.ph,.3*Math.sin(t*1.4+d.ph)];}}
 function fxUpdate(t){
+ lipSpray.forEach((e,k)=>{const x=XP+(k-2)*190,b=clamp((t-brkT(x))/TP,0,1);e.on=b>.25&&b<.98;if(e.on){e.pos=lipAt(x,t);e.vel=[0,2-8*b,10+10*b];}});
  crestSpray.forEach((e,k)=>{const x=(k-3)*170,c=crestAt(x,t),b=clamp((t-brkT(x))/TP,0,1);e.on=b<.95;e.pos=c;e.vel=[0,6+10*b,10+8*ease((t-6)/6)+16*b];});
  const zf=zF(t),on=t>TI&&zf<38;boreMist.forEach(e=>{e.on=on;e.pos=[0,Math.max(floodLevel(0,zf-6,t),0)+1,zf-6];});
  impactMist.on=t>TI-.2;
  for(const b of bursts){const age=t-b.t;b.e.on=age>-.05&&age<b.span;b.e.burst=[eng.time-age,b.win];}
- if(Q.get('fx')==='0'){crestSpray.concat(boreMist,bursts.map(b=>b.e),[impactMist]).forEach(e=>{e.on=false;});}   /* debug: no particles */
+ if(Q.get('fx')==='0'){crestSpray.concat(lipSpray,boreMist,bursts.map(b=>b.e),[impactMist]).forEach(e=>{e.on=false;});}   /* debug: no particles */
  eng.setPane({drops:.45+.5*ease((t-TA-.3)/1.2)*(1-ease((t-27)/2.5)),dirt:.45,haze:.06+.05*ease((t-TA)/1)*(1-ease((t-24)/4))});}
 
 /*SCORE-BEGIN*/
