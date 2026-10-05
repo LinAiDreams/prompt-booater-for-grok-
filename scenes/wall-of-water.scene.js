@@ -1,6 +1,7 @@
-/* Wall of Water - a tsunami seen through a rain-speckled apartment window. 26 s loop.
-   0-10 s a black wall of water towers behind the blocks; ~5 s a muddy bore breaks out ahead of it and races up the street;
-   ~12 s it reaches the car park, floats cars, the truck and debris toward the camera; then a roaring river of foam.
+/* Wall of Water - a tsunami seen through a rain-speckled apartment window. 30 s loop, with a procedural sound score.
+   0-8.5 s a black wall of water towers over the blocks while a siren wails; 8.5 s its lip throws forward and at ~11.7 s
+   plunges onto the town 90 m away (white water thrown 100 m up, the window rattles); the whitewater bore races up the street,
+   slams each block, lifts cars and the truck, hits the building under the window at ~14.9 s; then a roaring river of foam.
    Built on the Apex engine (v8). Query: ?t=seconds &q=0|1|2 &freeze=1 &dof=0 &pane=0 */
 (function(){
 const $=id=>document.getElementById(id),errBox=$('err');
@@ -125,22 +126,45 @@ const post={a:[.06,.058,.055],m:0,r:.95,mode:'rock'};
 add(genBox(.5,3.2,.35),[CAM[0]-.86,CAM[1]-.2,CAM[2]-.62],post);
 add(genBox(.5,3.2,.35),[CAM[0]+.9,CAM[1]-.2,CAM[2]-.62],post);
 
-/* ---------- the tsunami wall: a curved sheet, leaning over at the crest ---------- */
-const WX=160,WY=36;
-const wallG=(()=>{const vb=new Float32Array((WX+1)*(WY+1)*8),ib=[];for(let i=0;i<WX;i++)for(let j=0;j<WY;j++){const a=i*(WY+1)+j,b=a+WY+1;ib.push(a,b,a+1,a+1,b,b+1);}return {vb,ib:new Uint32Array(ib)};})();
+const LOOP=30;
+/* ---------- the tsunami: one sheet whose profile runs base -> face -> lip. It towers, pitches its lip forward,
+   plunges onto the blocks ~90 m from the window, then collapses into the whitewater bore ---------- */
+const WX=160,WY=48,FC=.5;                       /* rows below FC*WY are the face, above it the lip */
+const TB=8.5,TP=3.2,XP=-20,PEEL=.0016;          /* break start, plunge duration, where the break starts, lateral peel (s/m) */
+const zW=t=>-380+15*t;                          /* wall base position */
+const hW=t=>100+55*ease(t/TB);                  /* wall height while it builds */
+const wcurve=x=>.00018*x*x+22*Math.sin(x*.004+1)+9*Math.sin(x*.013);
+const brkT=x=>TB+Math.abs(x-XP)*PEEL;           /* when the lip starts to throw at column x */
+const PY=new Float32Array(WY+1),PZ=new Float32Array(WY+1);
+function profile(x,t){
+ const t0=brkT(x),b=clamp((t-t0)/TP,0,1),bb=b*b*(3-2*b),c=ease((t-t0-TP)/3.5);
+ const H=hW(Math.min(t,TB)),Hc=H*(1-.84*c),sink=34*ease((t-t0-TP-2.5)/3),z0=zW(t)+wcurve(x);
+ const nf=Math.round(WY*FC),wob=4*Math.sin(x*.02+t*.6);
+ for(let j=0;j<=nf;j++){const f=j/nf;PY[j]=-6+f*(Hc*.86+6)-sink;PZ[j]=z0+Hc*(.1*f*f+.12*bb*f*f*f)+wob*f*f;}
+ /* the lip: integrate a curve whose heading turns from up to forward-down as the wave pitches, then let it fall */
+ const L=Hc*(.2+.85*bb),n=WY-nf,ds=L/n,th0=.3+.6*bb,kap=.5+2.4*bb;let y=PY[nf],z=PZ[nf];
+ for(let j=1;j<=n;j++){const s=(j-.5)/n,ph=th0+kap*s+.08*Math.sin(x*.05+t*2.)*s;z+=Math.sin(ph)*ds;y+=Math.cos(ph)*ds;
+  const s1=j/n,drop=Hc*.5*bb*bb*s1*s1;PY[nf+j]=Math.max(y-drop,1.5-sink);PZ[nf+j]=z+drop*.25;}
+ return {H:Hc,b,c};}
+/* two coincident sheets with opposite winding and normals: the face/inner side and the back of the lip are both true front faces
+   (the back copy carries uv.x + 10000 so the shader knows which side it is shading) */
+const WN=(WX+1)*(WY+1);
+const wallG=(()=>{const vb=new Float32Array(WN*2*8),ib=[];for(let i=0;i<WX;i++)for(let j=0;j<WY;j++){const a=i*(WY+1)+j,b=a+WY+1;ib.push(a,b,a+1,a+1,b,b+1);ib.push(WN+a,WN+a+1,WN+b,WN+a+1,WN+b+1,WN+b);}return {vb,ib:new Uint32Array(ib)};})();
 const wallM=eng.addMesh(wallG);
 const wall=eng.addObject({m:wallM,p:[0,0,0],s:1,rot:[0,0,0],castShadow:false,mat:{a:[0,0,0],m:0,r:.4,mode:'tsuwall',modelA:120,modelB:0}});
-const zW=t=>-330+9*t;                       /* wall position */
-const hW=t=>95+60*ease(t/16);                /* wall height */
-function wallUpdate(t){const vb=wallG.vb,H=hW(t),z0=zW(t);
- for(let i=0;i<=WX;i++){const x=(i/WX-.5)*1900,curve=.00018*x*x+22*Math.sin(x*.004+1)+9*Math.sin(x*.013);
-  for(let j=0;j<=WY;j++){const f=j/WY,o=(i*(WY+1)+j)*8;
-   const lean=H*(.06*f+.16*Math.pow(ease((f-.55)/.45),2))+6*Math.sin(x*.02+t*.6)*f*f;   /* face tilts toward us, crest overhangs */
-   const y=-6+f*(H+6)+(f>.92?Math.sin(x*.05+t*2.)*2.5:0);
-   vb[o]=x;vb[o+1]=y;vb[o+2]=z0+curve+lean;
-   const dz=H*(.06+.32*ease((f-.55)/.45)*Math.max(f-.55,0)/.45);const nl=Math.hypot(dz,H)||1;vb[o+3]=0;vb[o+4]=-dz/nl;vb[o+5]=H/nl;
-   vb[o+6]=x+900;vb[o+7]=f*H;}}
- eng.updateMesh(wallM,vb);wall.mat.modelA=H;}
+function wallUpdate(t){const vb=wallG.vb;let Hs=1;
+ for(let i=0;i<=WX;i++){const x=(i/WX-.5)*1900,pr=profile(x,t);Hs=Math.max(Hs,pr.H);
+  for(let j=0;j<=WY;j++){const o=(i*(WY+1)+j)*8,j0=Math.max(j-1,0),j1=Math.min(j+1,WY);
+   const ty=PY[j1]-PY[j0],tz=PZ[j1]-PZ[j0],tl=Math.hypot(ty,tz)||1;
+   vb[o]=x;vb[o+1]=PY[j];vb[o+2]=PZ[j];vb[o+3]=0;vb[o+4]=-tz/tl;vb[o+5]=ty/tl;
+   vb[o+6]=x+900;vb[o+7]=j/WY*pr.H;
+   const q=o+WN*8;vb[q]=vb[o];vb[q+1]=vb[o+1];vb[q+2]=vb[o+2];vb[q+3]=0;vb[q+4]=-vb[o+4];vb[q+5]=-vb[o+5];vb[q+6]=vb[o+6]+10000;vb[q+7]=vb[o+7];}}
+ eng.updateMesh(wallM,vb);const pc=profile(XP,t);wall.mat.modelA=pc.H;wall.mat.modelB=clamp(pc.b*.35+pc.c*.9,0,1);
+ wall.p=[0,t>TB+TP+9?-200:0,0];}
+/* where the lip lands (centre column), when */
+const TI=TB+TP;profile(0,TI);const ZP=PZ[WY];
+const lipAt=(x,t)=>{profile(x,t);return [x,PY[WY],PZ[WY]];};
+const crestAt=(x,t)=>{profile(x,t);let k=0;for(let j=1;j<=WY;j++)if(PY[j]>PY[k])k=j;return [x,PY[k],PZ[k]];};
 
 /* ---------- the flood: a camera-facing grid, fine near the window, coarse toward the wall ---------- */
 const FX=110,fxs=[];for(let i=0;i<=FX;i++)fxs.push((i/FX-.5)*150);
@@ -149,12 +173,14 @@ const FZ=fzs.length-1;
 const floodG=(()=>{const vb=new Float32Array((FX+1)*(FZ+1)*8),ib=[];for(let j=0;j<FZ;j++)for(let i=0;i<FX;i++){const a=j*(FX+1)+i,b=a+FX+1;ib.push(a,a+1,b,a+1,b+1,b);}   /* counter-clockwise seen from above */return {vb,ib:new Uint32Array(ib)};})();
 const floodM=eng.addMesh(floodG);
 const flood=eng.addObject({m:floodM,p:[0,0,0],s:1,rot:[0,0,0],castShadow:false,mat:{a:[0,0,0],m:0,r:.2,mode:'flood',modelA:7}});
-const zF=t=>t<5?zW(t)+20:Math.min(zW(5)+20+(t-5)*(30+3.2*(t-5)),40);   /* bore front: breaks out at 5 s, reaches the car park ~12 s */
-const dMax=t=>3.2+3.2*ease((t-9)/10);
+/* bore front: a skirt of water at the wall's foot, then from the plunge point it races up the street (reaches the window ~15.6 s) */
+const zF=t=>t<TI?zW(t)+wcurve(0)+12:Math.min(ZP+(t-TI)*(10+2*(t-TI)),40);
+const TA=(()=>{let t=TI;while(zF(t)<6&&t<LOOP)t+=.01;return t;})();     /* bore hits the building under the window */
+const dMax=t=>t<TI?2.5:2.5+5.5*ease((t-TI)/6);
 function floodLevel(x,z,t){
  const zf=zF(t),behind=zf-z;if(behind<-2)return -1;
  const D=dMax(t)*(1+.25*Math.exp(-Math.abs(x)*.02));
- let y=D*ease(behind/22)+1.8*Math.exp(-Math.pow((behind-7)/5,2))*ease((t-5)/2);   /* deep behind, a rolling bore at the front */
+ let y=D*ease(behind/22)+3.2*Math.exp(-Math.pow((behind-7)/6,2))*ease((t-TI)/1.2);   /* deep behind, a rolling bore at the front */
  const k=z-t*7.5;
  y+=(.55*Math.sin(k*.21+x*.06)+.35*Math.sin(k*.47-x*.11+1.3)+.22*Math.sin(k*.93+x*.27+2.)+.12*Math.sin(x*.7+t*3.1))*Math.min(1,D/3)*ease(behind/14);
  return y;}
@@ -170,63 +196,172 @@ function floodUpdate(t){const vb=floodG.vb,zf=zF(t);
   vb[o+6]=clamp(.32+front*.9+steep*.9,0,1);vb[o+7]=clamp(.5+steep,0,1);}}
  eng.updateMesh(floodM,vb);}
 
-/* ---------- spray and mist: torn off the crest, boiling at the bore ---------- */
+
+/* ---------- spray and splashes ---------- */
 const crestSpray=[];for(let k=0;k<7;k++)crestSpray.push(eng.addEmitter({kind:'smoke',pos:[0,0,0],count:160,vel:[0,6,14],life:7,spread:[130,10,14],size:22,gravity:-1.5,turbulence:.5,growth:2.2,color:[.78,.8,.82],alpha:.32,soft:.9,windFollow:.5}));
-const boreMist=[eng.addEmitter({kind:'smoke',pos:[0,0,0],count:220,vel:[0,2.5,6],life:4,spread:[45,1.5,8],size:5,gravity:-.4,turbulence:.6,growth:1.8,color:[.75,.72,.66],alpha:.28,soft:.9}),
- eng.addEmitter({kind:'sparks',pos:[0,0,0],count:500,vel:[0,4,7],life:1.6,spread:[40,1,6],size:.05,gravity:9,turbulence:.3,color:[.85,.84,.8],alpha:1,stretch:.06})];
+const boreMist=[eng.addEmitter({kind:'smoke',pos:[0,0,0],count:220,vel:[0,3.5,6],life:4,spread:[45,1.5,8],size:6,gravity:-.4,turbulence:.6,growth:1.8,color:[.78,.76,.7],alpha:.32,soft:.9}),
+ eng.addEmitter({kind:'sparks',pos:[0,0,0],count:500,vel:[0,5,7],life:1.6,spread:[40,1,6],size:.05,gravity:9,turbulence:.3,color:[.85,.84,.8],alpha:1,stretch:.06})];
+/* one-shot bursts (engine 'burst' emitters: every particle born once inside the spawn window) */
+const bursts=[];
+function burst(tFire,pos,o){const e=eng.addEmitter(Object.assign({on:false,burst:[0,1]},o,{pos}));bursts.push({e,t:tFire,win:o.win||1,span:(o.life||6)+(o.win||1)});return e;}
+/* the plunge: a wall of white water thrown 100 m up along the impact line, at three points along the peeling break */
+for(const dx of [-320,0,320]){const x=XP+dx,ti=brkT(x)+TP,p=lipAt(x,ti);p[1]=6;
+ burst(ti-.15,p,{kind:'smoke',count:320,vel:[0,44,12],life:6.5,spread:[170,8,14],size:15,gravity:10,turbulence:.7,growth:2.2,color:[.9,.92,.92],alpha:.3,soft:3,win:1.4});
+ burst(ti-.1,p,{kind:'smoke',count:260,vel:[0,16,22],life:9,spread:[190,14,10],size:34,gravity:.6,turbulence:.6,growth:2.4,color:[.8,.82,.83],alpha:.09,soft:3,win:2.5});
+ burst(ti-.1,[p[0],p[1],p[2]],{kind:'sparks',count:1800,vel:[0,40,18],life:5,spread:[170,4,10],size:.3,gravity:9.8,turbulence:.2,color:[.8,.82,.84],alpha:.4,stretch:.05,win:1.2});}
+/* lingering mist over the impact zone */
+const impactMist=eng.addEmitter({kind:'smoke',pos:[XP,15,ZP-20],count:240,vel:[0,2.5,7],life:11,spread:[320,14,40],size:30,gravity:-.1,turbulence:.6,growth:1.6,color:[.78,.79,.8],alpha:.08,soft:3,on:false});
+/* the bore slamming into each block between the impact and the window: spray climbs the facade */
+const hits=[];for(const b of blocks){const zf=b.z+b.d/2;if(zf<ZP+4||zf>0)continue;let t=TI;while(zF(t)<zf&&t<LOOP)t+=.02;
+ hits.push({t,pos:[b.x,1,zf+1],b});burst(t,[b.x,1,zf+1.5],{kind:'smoke',count:260,vel:[0,24,3],life:5,spread:[b.w*.5,1,1.5],size:7,gravity:7,turbulence:.6,growth:2.2,color:[.82,.8,.76],alpha:.55,soft:1.5,win:.8});}
+/* ... and into the building under the window: a curtain of spray rises past the glass */
+burst(TA-.05,[0,1,9],{kind:'smoke',count:420,vel:[0,27,2.5],life:5,spread:[42,1,1.2],size:6,gravity:8,turbulence:.7,growth:2.4,color:[.84,.82,.78],alpha:.38,soft:1,win:.9});
+burst(TA,[0,1,9],{kind:'sparks',count:1400,vel:[0,26,5],life:3,spread:[40,1,1],size:.08,gravity:9.8,turbulence:.3,color:[.86,.85,.82],alpha:.5,stretch:.05,win:.9});
 
 /* ---------- debris swept by the flood ---------- */
 const debris=[];
 for(let k=0;k<26;k++){const big=k<8,g=big?genBox(2.2+rnd()*2,.25,.5+rnd()*.6):genBox(.5+rnd()*1.2,.12+rnd()*.3,.3+rnd()*.5);
  const o=eng.addObject({m:eng.addMesh(g),p:[0,-50,0],s:1,rot:[0,0,0],castShadow:false,mat:{a:[.18+rnd()*.12,.13+rnd()*.08,.09],m:0,r:.8,wet:1}});
- debris.push({o,x:(rnd()-.5)*40,z0:-40-rnd()*260,ph:rnd()*TAU,sp:.75+rnd()*.4});}
+ debris.push({o,x:(rnd()-.5)*40,z0:ZP-10-rnd()*60,ph:rnd()*TAU,sp:.75+rnd()*.4});}
 
 /* ---------- simulation ---------- */
+const lifted=[];   /* vehicles lifted this frame (the score turns them into crunches) */
 function vehiclesUpdate(t,dt){
  for(const v of vehicles){
   if(t<.05){v.state=0;v.x=v.x0;v.z=v.z0;v.y=0;v.yaw=v.yaw0;v.vx=0;v.vz=0;v.spin=0;}
   if(v.x===undefined){v.x=v.x0;v.z=v.z0;v.yaw=v.yaw0;}
   const lv=floodLevel(v.x,v.z,t),depth=lv;
-  if(v.state===0&&depth>v.draft){v.state=1;v.spin=(rnd()-.5)*.8;v.vx=(rnd()-.5)*1.5;}
+  if(v.state===0&&depth>v.draft){v.state=1;v.spin=(rnd()-.5)*.8;v.vx=(rnd()-.5)*1.5;v.vz=4;lifted.push(v);}
   let roll=0,pitch=0;
-  if(v.state===1){const flow=6+3*Math.min(1,(t-12)/6);v.vz+=(flow-v.vz)*Math.min(1,dt*.8);v.vx*=1-dt*.3;
+  if(v.state===1){const flow=6+4*Math.min(1,(t-TI)/5);v.vz+=(flow-v.vz)*Math.min(1,dt*.8);v.vx*=1-dt*.3;
    v.x+=v.vx*dt;v.z=Math.min(v.z+v.vz*dt,40);v.yaw+=v.spin*dt;v.y+=(Math.max(lv-v.draft,0)-v.y)*Math.min(1,dt*3);
    roll=.18*Math.sin(t*1.7+v.ph);pitch=.12*Math.sin(t*1.3+v.ph*2);}
   for(const p of v.parts){p.p=[v.x,v.y,v.z];p.rot=[pitch,v.yaw,roll];}}}
-function debrisUpdate(t){for(const d of debris){const z=d.z0+(t-5)*9*d.sp,lv=floodLevel(d.x,z,t);
- if(lv<.2||z>40){d.o.p=[0,-50,0];continue;}d.o.p=[d.x+2*Math.sin(t*.7+d.ph),lv+.05,z];d.o.rot=[.3*Math.sin(t*1.9+d.ph),t*.6+d.ph,.3*Math.sin(t*1.4+d.ph)];}}
-function fxUpdate(t){const H=hW(t),z0=zW(t);
- crestSpray.forEach((e,k)=>{const x=(k-3)*170;e.pos=[x,H*.97,z0+.00018*x*x+H*.2];e.vel=[0,6,10+8*ease((t-8)/8)];});
- const zf=zF(t),on=t>5&&zf<38;boreMist.forEach(e=>{e.on=on;e.pos=[0,Math.max(floodLevel(0,zf-6,t),0)+1,zf-6];});}
+function debrisUpdate(t){for(const d of debris){const z=d.z0+(t-TI)*11*d.sp,lv=floodLevel(d.x,z,t);
+ if(t<TI||lv<.2||z>40){d.o.p=[0,-50,0];continue;}d.o.p=[d.x+2*Math.sin(t*.7+d.ph),lv+.05,z];d.o.rot=[.3*Math.sin(t*1.9+d.ph),t*.6+d.ph,.3*Math.sin(t*1.4+d.ph)];}}
+function fxUpdate(t){
+ crestSpray.forEach((e,k)=>{const x=(k-3)*170,c=crestAt(x,t),b=clamp((t-brkT(x))/TP,0,1);e.on=b<.95;e.pos=c;e.vel=[0,6+10*b,10+8*ease((t-6)/6)+16*b];});
+ const zf=zF(t),on=t>TI&&zf<38;boreMist.forEach(e=>{e.on=on;e.pos=[0,Math.max(floodLevel(0,zf-6,t),0)+1,zf-6];});
+ impactMist.on=t>TI-.2;
+ for(const b of bursts){const age=t-b.t;b.e.on=age>-.05&&age<b.span;b.e.burst=[eng.time-age,b.win];}
+ if(Q.get('fx')==='0'){crestSpray.concat(boreMist,bursts.map(b=>b.e),[impactMist]).forEach(e=>{e.on=false;});}   /* debug: no particles */
+ eng.setPane({drops:.45+.5*ease((t-TA-.3)/1.2)*(1-ease((t-27)/2.5)),dirt:.45,haze:.06+.05*ease((t-TA)/1)*(1-ease((t-24)/4))});}
 
-/* ---------- camera: nervous handheld behind the glass ---------- */
+/*SCORE-BEGIN*/
+/* ---------- sound: every layer is placed in the world and driven by the same timeline as the picture.
+   Continuous beds are noise voices whose loudness is set by moving them along their bearing (inverse-distance law);
+   one-shots fire on the frame their event happens, delayed by the sound's travel time to the window ---------- */
+function makeScore(A,eng,S){
+ const SR=()=>(A.ctx&&A.ctx.sampleRate)||48000,cp=()=>eng.camera.pos;
+ const travel=p=>Math.round(v3.len(v3.sub(p,cp()))/343*SR());
+ const at=(p,o)=>Object.assign({pos:p,delay:travel(p)},o);
+ const beds={};let lastT=-1,live=false;
+ /* bed voice placed REF/g metres from the listener along `dir`: g = loudness 0..1 */
+ const REF=10;
+ function bedPos(dir,g){const c=cp(),d=v3.norm(dir),r=REF/Math.max(g,.004);return [c[0]+d[0]*r,c[1]+d[1]*r,c[2]+d[2]*r];}
+ function startBeds(t){const left=Math.max(LOOP-t,.2);
+  beds.rumble=A.play(5,{pos:bedPos([0,0,-1],.01),gain:1.5,ref:REF,dur:left,send:.15,p:[0,0,1,1,130,16,0,0,0]});
+  beds.roar=A.play(5,{pos:bedPos([0,0,-1],.01),gain:1.1,ref:REF,dur:left,send:.3,p:[0,0,1,1,1500,220,0,0,0]});
+  beds.hiss=A.play(5,{pos:bedPos([0,0,-1],.01),gain:.45,ref:REF,dur:left,send:.35,p:[0,0,1,.8,9000,2600,0,0,0]});
+  beds.wash=A.play(6,{pos:bedPos([0,-1,-1],.01),gain:1.3,ref:REF,dur:left,send:.2,p:[520,55,.4,2,5200]});
+  beds.gurgle=A.play(6,{pos:bedPos([.4,-1,-1],.01),gain:1.4,ref:REF,dur:left,send:.25,p:[300,90,.25,2,900]});}
+ const ev=[];const on=(t,f)=>ev.push({t,f});
+ /* civil-defence siren, two-tone, from across the town: rises and falls until the power goes at the break */
+ for(let k=0;k<4;k++){const t0=.4+k*2.2,up=k%2===0;
+  for(const r of [1,1.26])on(t0,()=>A.play(5,{pos:[-480,60,-260],gain:.45,ref:200,dur:2.25,send:.85,p:up?[430*r,780*r,1.9,0,1,1,0,0,0]:[780*r,430*r,1.9,0,1,1,0,0,0]}));}
+ on(.4+4*2.2,()=>A.play(5,{pos:[-480,60,-260],gain:.45,ref:200,dur:1.6,send:.9,p:[430,180,1.5,0,1,1,0,1.4,0]}));   /* winds down */
+ /* the wall groans: deep thunderous swells from the face */
+ for(const t of [3.2,6.1])on(t,()=>{const p=crestAt(-10,t);A.sfx.thunder(p,600);});
+ /* the lip throws: a huge rising band-swept whoosh */
+ on(TB,()=>{const p=crestAt(XP,TB);A.play(5,{pos:p,gain:1.2,ref:120,dur:TP+.3,send:.5,p:[0,0,TP,1,180,1600,0,0,1]});});
+ /* the plunge along the peeling impact line: boom, thunder, splash, buildings struck, glass everywhere */
+ for(const dx of [0,-320,320]){const x=XP+dx,ti=brkT(x)+TP,main=dx===0;
+  on(ti,()=>{const p=lipAt(x,ti);p[1]=8;
+   A.play(5,at(p,{gain:main?1.4:.9,ref:60,dur:4.5,send:.55,p:[70,22,1.4,1.3,700,18,.55,1.6,0]}));
+   A.play(5,at(p,{gain:main?1:.6,ref:60,dur:6,send:.75,p:[0,0,1,1.2,2600,180,.42,0,0]}));
+   A.sfx.thunder(p,250);
+   if(main)for(let k=0;k<5;k++)A.play(3,at([p[0]+(k-2)*25,10,p[2]],{gain:1,ref:40,freq:70+k*14,send:.4,p:[2,1.1,1.3]}));});}
+ /* the shock wave reaches the window: it rattles in its frame */
+ const rattle=(t0,n,s)=>{for(let k=0;k<n;k++)on(t0+k*.045+Math.sin(k*7.1)*.012,()=>{const c=cp();A.sfx.impact('glass',[c[0]+.4*Math.sin(k*3.3),c[1]-.3,c[2]-.6],s*(1-k/n*.6),.7);});};
+ const shockT=TI+Math.abs(ZP-13)/343;rattle(shockT,9,.4);
+ /* windows shattering in the struck blocks, scattered over a second and a half */
+ for(let k=0;k<14;k++){const tk=TI+.25+k*.1+Math.sin(k*12.9)*.05;on(tk,()=>{const x=XP+(Math.sin(k*4.7))*80,p=[x,4+Math.abs(Math.sin(k*2.1))*24,ZP+8+Math.sin(k*1.3)*10];A.sfx.impact('glass',at(p,{}).pos,.7+.5*Math.abs(Math.sin(k)),.25+.4*Math.abs(Math.sin(k*3.)));});}
+ /* car alarms set off by the shock, until the water drowns them */
+ for(const [x,z,f0,f1,per] of [[-3,-36,1180,760,.24],[8,-24,930,1400,.16],[-14,-3,2200,1600,.11]]){
+  const t0=TI+.6+Math.abs(z)*.004;let t1=TI;while(zF(t1)<z&&t1<LOOP)t1+=.02;
+  for(let t=t0,k=0;t<t1;t+=per,k++){const f=k%2?f1:f0;on(t,()=>A.play(1,{pos:[x,1,z],gain:.16,ref:6,dur:per*.92,freq:f,send:.4,p:[1,f*2.5,.2,0,.1,.003,.02,0]}));}}
+ /* the bore hits each block on its way up the street */
+ for(const h of S.hits)on(h.t,()=>{A.play(5,at(h.pos,{gain:1,ref:25,dur:2.2,send:.45,p:[90,30,.7,1.2,1400,40,1.4,2.2,0]}));A.sfx.splash(h.pos,3);A.sfx.impact('stone',h.pos,1,18);});
+ /* ... and the building under the window: a slam, the pane cracks under the spray */
+ on(TA,()=>{const p=[0,2,9];A.play(5,{pos:p,gain:1.5,ref:12,dur:3,send:.4,p:[60,24,.9,1.4,1100,20,1.1,2,0]});A.sfx.splash(p,4);A.sfx.splash([-12,3,8],3);A.sfx.splash([14,3,8],3);});
+ rattle(TA+.03,12,.75);
+ on(TA+.35,()=>{const c=cp();A.sfx.impact('glass',[c[0]+.3,c[1]+.2,c[2]-.62],1.2,1.4);});
+ ev.sort((a,b)=>a.t-b.t);
+ /* bed levels from the picture: wall distance and height, break, bore distance, depth at the window */
+ function levels(t){const c=cp(),cr=crestAt(-10,t),dW=v3.len(v3.sub(cr,c)),pre=ease(t/1.5);
+  const build=clamp(160/dW,0,1)*ease(t/TB),hit=Math.exp(-Math.max(t-TI,0)*.35)*(t>TI?1:0);
+  const zf=zF(t),bp=[0,3,Math.min(zf,6)],dB=v3.len(v3.sub(bp,c)),bore=t>TI?clamp(30/dB,0,1):0;
+  const river=ease((t-TA+.3)/1.2),out=1-ease((t-(LOOP-1.6))/1.5);
+  return {rumble:[cr,pre*out*Math.min(1,.05+.75*build*build+.6*hit+.35*bore)],
+   roar:[t<TI?cr:bp,pre*out*Math.min(1,.05+.45*build*build+.9*hit+.6*bore+.5*river)],
+   hiss:[t<TI?cr:bp,pre*out*Math.min(1,.04+.3*clamp((t-TB)/TP,0,1)+.7*hit+.4*bore+.3*river)],
+   wash:[[0,-1,-1],out*.9*river],gurgle:[[.5,-1,-1.2],out*river]};}
+ function update(t){
+  if(!A.ready||!A.on){live=false;lastT=t;return;}
+  if(!live||t<lastT-.5){A.allOff();for(const k in beds)delete beds[k];startBeds(t);live=true;lastT=t;}
+  for(const e of ev)if(e.t>lastT&&e.t<=t)e.f();
+  for(const v of S.lifted.splice(0)){const p=[v.x,1,v.z],s=v.draft>1?1.2:.7;A.sfx.impact('metal',p,s,v.draft>1?9:3.5);A.sfx.splash(p,v.draft>1?2.5:1.4);}
+  if(t>TA&&Math.floor(t*1.6)!==Math.floor(lastT*1.6)){const fl=S.vehicles.filter(v=>v.state===1&&v.z>-40);if(fl.length){const v=fl[Math.floor((t*7.3)%fl.length)];A.sfx.impact(Math.sin(t*5)>0?'metal':'wood',[v.x,v.y+1,v.z],.35+.3*Math.abs(Math.sin(t)),2+Math.abs(Math.sin(t*3))*3);}}
+  const L=levels(t),c=cp();
+  for(const k in beds){const [ref,g]=L[k];const dir=ref.length===3&&Math.abs(ref[0])+Math.abs(ref[2])>5?v3.sub(ref,c):ref;A.move(beds[k],bedPos(dir,g));}
+  A.ambience({wind:Math.min(1,.3+.5*ease(t/TB)+.2*ease((t-TI)/2)),gust:.8,rain:.55,room:.35});
+  lastT=t;}
+ return {update,levels};}
+/*SCORE-END*/
+const audio=createAudio(eng,{music:false,volume:.95,reverb:{size:1,t60:2.6,damp:.45,wet:.24}});
+const score=makeScore(audio,eng,{hits,lifted,vehicles});
+
+/* ---------- camera: nervous handheld behind the glass, eyes pulled up the wall, down to the impact, then the street ---------- */
 eng.setPost({tone:'agx',look:[1.05,.92],saturation:.88,curve:.18,bloom:.04,threshold:1.2,grain:.05,chromatic:.006,vignette:.45,flare:0,dirt:0,
  dofMaxCoC:Q.get('dof')==='0'?0:5,lut:'cool',lutStrength:.3,motionBlur:.4,contactShadows:.8});
 eng.setPane({on:Q.get('pane')==='0'?0:1,drops:.45,dirt:.45,haze:.06});
-cam.fov=46*DEG;cam.fstop=4;cam.shutterAngle=180;
+cam.fov=54*DEG;cam.fstop=4;cam.shutterAngle=180;
 const hand=new Handheld({intensity:1,sway:.016,breath:.008,tremor:.0016,roll:.006,bob:.02});
-const LOOP=26;let T=+(Q.get('t')||0);
-function shot(t){
- const aimWall=[-8,30,-300],aimStreet=[-2,3,-70],aimRiver=[0,.5,-24];
- let a=aimWall;
- if(t>10.5)a=v3.add(v3.mul(aimWall,1-ease((t-10.5)/4.5)),v3.mul(aimStreet,ease((t-10.5)/4.5)));
- if(t>15.5)a=v3.add(v3.mul(aimStreet,1-ease((t-15.5)/4)),v3.mul(aimRiver,ease((t-15.5)/4)));
- hand.intensity=1+1.6*ease((t-9)/5)+.8*Math.max(0,Math.sin(t*9))*ease((t-11)/3)*.3;
- hand.update(1/60,cam,CAM,a);
- cam.focusTarget=t<11?[-2,14,-90]:[0,2,-40];}
-function step(dt){T+=dt;if(T>=LOOP)T-=LOOP;const t=T;
- wallUpdate(t);floodUpdate(t);vehiclesUpdate(t,dt);debrisUpdate(t);fxUpdate(t);shot(t);
+let T=+(Q.get('t')||0),aimS=null;
+function aimAt(t){const c=CAM;
+ /* look up the wall: keep the crest in the top fifth of the frame */
+ const cr=crestAt(-10,t),d=Math.hypot(cr[2]-c[2],cr[0]-c[0]),el=Math.max(Math.atan2(cr[1]-c[1],d)-12*DEG,1.5*DEG);
+ const wallAim=[-8,c[1]+Math.tan(el)*100,c[2]-100];
+ /* the lip coming over: follow it down to where it lands */
+ const lp=crestAt(XP,Math.min(t,TI)),ld=Math.hypot(lp[2]-c[2],lp[0]-c[0]),lel=Math.max(Math.atan2(lp[1]-c[1],ld)-13*DEG,4*DEG);
+ const lipAim=[XP*.4,c[1]+Math.tan(lel)*100,c[2]-100];
+ const zf=Math.min(zF(t),-8),streetAim=[-1,1,zf-6],riverAim=[0,.5,-22];
+ let a=v3.add(v3.mul(wallAim,1-ease((t-TB-.6)/2)),v3.mul(lipAim,ease((t-TB-.6)/2)));
+ a=v3.add(v3.mul(a,1-ease((t-TI-.6)/1.6)),v3.mul(v3.add(v3.mul(lipAim,.4),v3.mul(streetAim,.6)),ease((t-TI-.6)/1.6)));
+ a=v3.add(v3.mul(a,1-ease((t-TA+.6)/2.5)),v3.mul(riverAim,ease((t-TA+.6)/2.5)));
+ return a;}
+const jolts=[[TI+Math.abs(ZP-13)/343,.010,4],[TA,.022,3]];
+function shot(t,dt){
+ const a=aimAt(t);if(!aimS||dt<=0)aimS=a.slice();else{const k=1-Math.exp(-dt*3);aimS=v3.add(aimS,v3.mul(v3.sub(a,aimS),k));}
+ hand.intensity=1+1.4*ease((t-6)/5)+1.2*ease((t-TA)/1)*(1-ease((t-TA-6)/6)*.5);
+ hand.update(Math.max(dt,1/60),cam,CAM,aimS);
+ let jy=0,jx=0;for(const [tj,A,k] of jolts){const s=t-tj;if(s>0&&s<2.5){const e=A*Math.exp(-s*k);jy+=e*Math.sin(s*31);jx+=e*.6*Math.sin(s*23+1);}}
+ const dl=v3.len(v3.sub(cam.target,cam.pos));cam.target=[cam.target[0]+jx*dl,cam.target[1]+jy*dl,cam.target[2]];cam.pos=[cam.pos[0],cam.pos[1]+jy*.3,cam.pos[2]];
+ cam.focusTarget=t<TI+1?[-2,14,-90]:[0,2,-40];}
+function step(dt){const prev=T;T+=dt;if(T>=LOOP)T-=LOOP;const t=T;if(t<prev)aimS=null;
+ wallUpdate(t);floodUpdate(t);vehiclesUpdate(t,dt);debrisUpdate(t);fxUpdate(t);shot(t,t<prev?0:dt);score.update(t);
  if(Q.has('cam')){const c=Q.get('cam').split(',').map(Number);cam.pos=c.slice(0,3);cam.target=c.slice(3,6);cam.roll=0;}   /* debug: fixed camera */
- const fade=ease(t/1.2)*(1-ease((t-24.6)/1.4));eng.setPost({exposure:Math.max(fade*.62,.001)});}
-if(Q.has('t')){const t0=+Q.get('t');T=0;for(let k=0;k<t0*30;k++){T+=1/30;vehiclesUpdate(T,1/30);}T=t0;}
+ const fade=ease(t/1.2)*(1-ease((t-(LOOP-1.4))/1.4));eng.setPost({exposure:Math.max(fade*.62,.001)});}
+if(Q.has('t')){const t0=+Q.get('t');T=0;for(let k=0;k<t0*30;k++){T+=1/30;vehiclesUpdate(T,1/30);}lifted.length=0;T=t0;}
+if(Q.get('clouds')==='0')eng.setClouds({coverage:0,shadows:0});if(Q.get('fog')==='0')eng.setFog({density:0});if(Q.get('rain')==='0')eng.setWeather({rain:0,wetness:0});   /* debug */
 eng.start(dt=>step(dt));
 
 /* ---------- HUD ---------- */
-$('top').textContent='';$('bMode').textContent='Restart';$('bMode').onclick=()=>{T=0;};
+$('top').textContent='';$('bMode').textContent='Restart';$('bMode').onclick=()=>{T=0;aimS=null;};
 $('bTime').textContent='Pause';let paused=false;$('bTime').onclick=()=>{paused=!paused;eng.pause(paused);$('bTime').textContent=paused?'Play':'Pause';};
 let qi=0;const QM=['auto',0,1,2],QN=['Auto','Low','Med','High'];
 $('bQ').onclick=()=>{qi=(qi+1)%4;eng.setQuality(QM[qi]);$('bQ').textContent=QN[qi];};
-$('bSnd').onclick=()=>{$('bSnd').textContent=eng.audio.toggle()?'Sound on':'Sound off';};
+$('bSnd').textContent='Sound off';$('bSnd').onclick=()=>{const was=audio.started;audio.toggle();setTimeout(()=>{$('bSnd').textContent=audio.on?'Sound on':(was?'Sound off':'Starting...');},was?0:60);if(!was){const iv=setInterval(()=>{if(audio.on){$('bSnd').textContent='Sound on';clearInterval(iv);}},200);}};
 if(Q.has('q')){qi=+Q.get('q')+1;eng.setQuality(+Q.get('q'),Q.has('scale')?+Q.get('scale'):undefined);$('bQ').textContent=QN[qi];}
 eng.frozen=Q.has('freeze');window.__eng=eng;
 })();
