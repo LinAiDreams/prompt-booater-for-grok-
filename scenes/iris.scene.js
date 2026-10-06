@@ -185,9 +185,16 @@ const keyPos=v3.mul(v3.norm([-.62,.42,.66]),18);
 eng.addLight({type:'sphere',radius:5,pos:keyPos,color:[1,.96,.9],intensity:Q.has('key')?+Q.get('key'):20,range:60});   /* soft wrap around the sun key */
 eng.addLight({type:'point',pos:[22,-6,18],color:[1,.6,.35],intensity:40,range:80});
 
+/* ---------- bounce sources that only reach the eye through VXGI (no direct light of their own):
+   a gold reflector card under the eye, catching the sun key and throwing warm light up under the lids and into the pupil;
+   a teal practical panel off to the right, whose glow wraps the skin, sclera and lashes. Toggle GI to see them vanish. ---------- */
+add(genBox(22,.3,10),[0,-8.6,7.5],{a:[.95,.72,.38],m:0,r:.9,noProject:true},{rot:[-.55,0,0],castShadow:false});
+add(genBox(.3,9,9),[11.5,1,6],{a:[.02,.02,.02],m:0,r:.9,emissive:Q.has('em')?[.2,.9,1].map(v=>v*+Q.get('em')):[2,9,10],noProject:true},{rot:[0,-.75,0],castShadow:false});
 /* ---------- global illumination: VXGI clipmap centred on the eye ---------- */
 const giOn=Q.get('gi')!=='0';
-if(giOn)eng.setGI({extent:16,center:[0,0,0],intensity:1.3,bounce:.95,sky:.4});
+/* clipmap: 4 nested levels from a 20 m finest span (the lids, card and panel all inside level 1), strong single bounce, glossy cone on */
+const GIOPT={extent:20,levels:4,center:[0,-1,2],intensity:Q.has('gii')?+Q.get('gii'):2.4,bounce:1,sky:.15,specular:true};
+if(giOn)eng.setGI(GIOPT);
 
 /* ---------- the photo, projected back from its own camera ---------- */
 let proj=null,projOn=Q.get('proj')!=='0';
@@ -257,7 +264,7 @@ const b=1+.004*Math.sin(T*.7);
 /* ---------- HUD ---------- */
 $('top').textContent='Film: automatic camera   Drag: orbit   Pinch/scroll: zoom   Double-tap: Film';$('bMode').textContent='Film';
 $('bMode').onclick=()=>{if(orbit.mode==='film')orbit.free();else orbit.film();};
-let gi=giOn;$('bTime').textContent=gi?'GI on':'GI off';$('bTime').onclick=()=>{gi=!gi;if(gi)eng.setGI({extent:16,center:[0,0,0],intensity:1.3,bounce:.95,sky:.4});else eng.setGI(false);$('bTime').textContent=gi?'GI on':'GI off';};
+let gi=giOn;$('bTime').textContent=gi?'GI on':'GI off';$('bTime').onclick=()=>{gi=!gi;if(gi)eng.setGI(GIOPT);else eng.setGI(false);$('bTime').textContent=gi?'GI on':'GI off';};
 $('bSnd').textContent=projOn?'Photo on':'Photo off';$('bSnd').onclick=()=>{projOn=!projOn;if(proj)proj.set({on:projOn});$('bSnd').textContent=projOn?'Photo on':'Photo off';};
 let qi=0;const QM=['auto',0,1,2],QN=['Auto','Low','Med','High'];
 $('bQ').onclick=()=>{qi=(qi+1)%4;eng.setQuality(QM[qi]);$('bQ').textContent=QN[qi];};
