@@ -142,7 +142,7 @@ addE(revolve([[0,-1.15],[RP*.5,-1.22],[RP*.99,-1.45]],64,false),[0,0,0],{a:[0,0,
 /* sclera: the eyeball (radius 8 m, centre 6.9 m behind the iris plane) with the limbus opening */
 const SC=[0,0,-6.9],SRAD=8,ph0=Math.asin(RI/SRAD);
 const scl=[];for(let k=0;k<=48;k++){const ph=ph0+(Math.PI*.75-ph0)*k/48;scl.push([SRAD*Math.sin(ph),SC[2]+SRAD*Math.cos(ph)]);}
-addE(revolve(scl,128,false),[0,0,0],{a:[1,1,1],maps:SCLERA,uvScale:1,m:0,r:.35,clearcoat:.8,clearcoatRough:.08});
+addE(revolve(scl,128,false),[0,0,0],{a:[1,1,1],maps:SCLERA,uvScale:1,m:0,r:.35,clearcoat:.8,clearcoatRough:.08,mode:'skin',modelA:30,modelB:Q.has('sss')?+Q.get('sss')*.6:.6});
 /* limbal ring: a slightly darker ring where iris meets sclera */
 addE(revolve([[RI*.985,.02],[RI*1.03,-.05]],128,false),[0,0,0],{a:[.12,.07,.05],m:0,r:.5});
 /* cornea: a clear dome (radius 5.2 m) refracting the iris */
@@ -166,7 +166,9 @@ function lidSheet(edge,dir,crease){const NX=96,NT=40,vb=[],ib=[];
    vb.push(x,y,z,0,0,0,x/9,(y-y0)*dir/3.375+j*.004);}}
  for(let j=0;j<NT;j++)for(let i=0;i<NX;i++){const a=j*(NX+1)+i,b=a+NX+1;if(dir>0)ib.push(a,a+1,b,a+1,b+1,b);else ib.push(a,b,a+1,a+1,b,b+1);}
  return weldNormals({vb:new Float32Array(vb),ib:new Uint32Array(ib)});}
-const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.72,mode:'skin',noProject:true};
+/* subsurface: modelA scales the curvature into the pre-integrated skin LUT (this world is ~650x real size, so real-lid curvature needs a big gain);
+   transmission lets the key glow red through the thin lid margin when it is back-lit */
+const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.72,mode:'skin',modelA:45,modelB:Q.has('sss')?+Q.get('sss'):1,transmission:.55,thickness:1.4,attenuation:[1,.32,.18],noProject:true};
 const lidUp=add(lidSheet(lidU,1,.32),[0,0,0],skin),lidLo=add(lidSheet(lidL,-1,.12),[0,0,0],skin);
 /* lid skin from the closed-eye photo: delit tileable plate -> albedo; height = luminance band-pass -> normal; roughness from glint level */
 if(typeof document!=='undefined'&&document.createElement){const im=new Image();im.onload=()=>{try{
@@ -228,7 +230,7 @@ if(typeof Image!=='undefined'){const img=new Image(),hm=new Image();   /* albedo
  img.onload=go;hm.onload=go;img.src=IRIS_ALBEDO;hm.src=IRIS_HEIGHT;}
 
 /* ---------- camera ---------- */
-eng.setPost({tone:'agx',look:[1.18,1.2],saturation:1.12,curve:.3,bloom:.06,threshold:1.4,knee:.5,grain:.02,chromatic:.003,vignette:.85,flare:0,dirt:0,
+eng.setPost({tone:'agx',look:[1.18,1.2],saturation:1.12,curve:.3,bloom:Q.has('bl')?+Q.get('bl'):.13,threshold:.95,knee:.75,grain:.02,chromatic:.003,vignette:.85,flare:0,dirt:0,
  dofMaxCoC:Q.get('dof')==='0'?0:6,exposure:Q.has('ex')?+Q.get('ex'):.5});
 cam.fstop=5.6;cam.bokehScale=Q.get('dof')==='0'?0:1.6;cam.shutterAngle=180;
 function makeOrbit(canvas,o){

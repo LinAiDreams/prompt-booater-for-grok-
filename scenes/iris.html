@@ -1653,10 +1653,15 @@ void main(){
  if(uMode==5){
   /* pre-integrated skin: LUT(N.L, curvature) diffuse, dual-lobe GGX (oily narrow + broad), thin-part transmittance */
   float curv=clamp(length(fwidth(Ng))/(length(fwidth(vWP))+1e-4)*.02*(uMatG.x>0.?uMatG.x:1.),0.,1.);
-  vec3 sss=skinLut(NoLs,curv);
+  vec3 sss=skinLut(NoLs,curv);vec3 aoS=vec3(ao);
+  /* opt-in (modelB > 0): per-channel bent normals (Penner pre-integrated skin). Red light diffuses furthest under the skin, so it sees
+     a surface close to the smooth geometric normal; blue keeps the fine detail. Pores and creases soften with a warm red fringe,
+     and cavity occlusion is likewise filled in by scattered red light. */
+  if(uMatG.y>0.){float k=clamp(uMatG.y,0.,1.);vec3 nR=normalize(mix(N,Ng,.9*k)),nG=normalize(mix(N,Ng,.5*k)),nB=normalize(mix(N,Ng,.15*k));
+   sss=vec3(skinLut(dot(nR,L),curv).r,skinLut(dot(nG,L),curv).g,skinLut(dot(nB,L),curv).b);aoS=mix(vec3(ao),vec3(1.),vec3(.6,.3,.1)*k);}
   float r1=r*.75,r2=r*1.3,a1=r1*r1,a1s=a1*a1,a2b=r2*r2,a2s=a2b*a2b,d1=NoH*NoH*(a1s-1.)+1.,d2=NoH*NoH*(a2s-1.)+1.;
   float Dd=.85*a1s/(PI*d1*d1)+.15*a2s/(PI*d2*d2);vec3 Fs=vec3(.028)+(1.-.028)*pow(1.-VoH,5.);
-  col=(alb*sss/PI*sh+min(Dd*vis,1000.)*Fs*NoL*sh)*uSunColor+alb*irr*ao+pre*envBRDF(vec3(.028),r,NoV)*specOcc(NoV,ao,r);
+  col=(alb*sss/PI*sh+min(Dd*vis,1000.)*Fs*NoL*sh)*uSunColor+alb*irr*aoS+pre*envBRDF(vec3(.028),r,NoV)*specOcc(NoV,ao,r);
   if(trn>0.){vec3 Tc=pow(max(uAtten,vec3(1e-3)),vec3(uMatB.w));col+=trn*alb*Tc*pow(max(dot(-V,L),0.),3.)*max(-NoLs+.4,0.)*uSunColor*sunShadow(vWP,-N,.3,vViewZ);}
  }else if(uMode==6){
   /* eye: sclera + iris under a refracting cornea. uAnisoDir = gaze (world), uObjC = eye centre, uMatG.x = iris radius, .y = pupil */
@@ -12848,7 +12853,7 @@ addE(revolve([[0,-1.15],[RP*.5,-1.22],[RP*.99,-1.45]],64,false),[0,0,0],{a:[0,0,
 /* sclera: the eyeball (radius 8 m, centre 6.9 m behind the iris plane) with the limbus opening */
 const SC=[0,0,-6.9],SRAD=8,ph0=Math.asin(RI/SRAD);
 const scl=[];for(let k=0;k<=48;k++){const ph=ph0+(Math.PI*.75-ph0)*k/48;scl.push([SRAD*Math.sin(ph),SC[2]+SRAD*Math.cos(ph)]);}
-addE(revolve(scl,128,false),[0,0,0],{a:[1,1,1],maps:SCLERA,uvScale:1,m:0,r:.35,clearcoat:.8,clearcoatRough:.08});
+addE(revolve(scl,128,false),[0,0,0],{a:[1,1,1],maps:SCLERA,uvScale:1,m:0,r:.35,clearcoat:.8,clearcoatRough:.08,mode:'skin',modelA:30,modelB:Q.has('sss')?+Q.get('sss')*.6:.6});
 /* limbal ring: a slightly darker ring where iris meets sclera */
 addE(revolve([[RI*.985,.02],[RI*1.03,-.05]],128,false),[0,0,0],{a:[.12,.07,.05],m:0,r:.5});
 /* cornea: a clear dome (radius 5.2 m) refracting the iris */
@@ -12872,7 +12877,9 @@ function lidSheet(edge,dir,crease){const NX=96,NT=40,vb=[],ib=[];
    vb.push(x,y,z,0,0,0,x/9,(y-y0)*dir/3.375+j*.004);}}
  for(let j=0;j<NT;j++)for(let i=0;i<NX;i++){const a=j*(NX+1)+i,b=a+NX+1;if(dir>0)ib.push(a,a+1,b,a+1,b+1,b);else ib.push(a,b,a+1,a+1,b,b+1);}
  return weldNormals({vb:new Float32Array(vb),ib:new Uint32Array(ib)});}
-const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.72,mode:'skin',noProject:true};
+/* subsurface: modelA scales the curvature into the pre-integrated skin LUT (this world is ~650x real size, so real-lid curvature needs a big gain);
+   transmission lets the key glow red through the thin lid margin when it is back-lit */
+const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.72,mode:'skin',modelA:45,modelB:Q.has('sss')?+Q.get('sss'):1,transmission:.55,thickness:1.4,attenuation:[1,.32,.18],noProject:true};
 const lidUp=add(lidSheet(lidU,1,.32),[0,0,0],skin),lidLo=add(lidSheet(lidL,-1,.12),[0,0,0],skin);
 /* lid skin from the closed-eye photo: delit tileable plate -> albedo; height = luminance band-pass -> normal; roughness from glint level */
 if(typeof document!=='undefined'&&document.createElement){const im=new Image();im.onload=()=>{try{
@@ -12934,7 +12941,7 @@ if(typeof Image!=='undefined'){const img=new Image(),hm=new Image();   /* albedo
  img.onload=go;hm.onload=go;img.src=IRIS_ALBEDO;hm.src=IRIS_HEIGHT;}
 
 /* ---------- camera ---------- */
-eng.setPost({tone:'agx',look:[1.18,1.2],saturation:1.12,curve:.3,bloom:.06,threshold:1.4,knee:.5,grain:.02,chromatic:.003,vignette:.85,flare:0,dirt:0,
+eng.setPost({tone:'agx',look:[1.18,1.2],saturation:1.12,curve:.3,bloom:Q.has('bl')?+Q.get('bl'):.13,threshold:.95,knee:.75,grain:.02,chromatic:.003,vignette:.85,flare:0,dirt:0,
  dofMaxCoC:Q.get('dof')==='0'?0:6,exposure:Q.has('ex')?+Q.get('ex'):.5});
 cam.fstop=5.6;cam.bokehScale=Q.get('dof')==='0'?0:1.6;cam.shutterAngle=180;
 function makeOrbit(canvas,o){
