@@ -41,9 +41,9 @@ const HERO={pos:[PC[0],PC[1],PD],target:[PC[0],PC[1],0],fov:PFOV};
   const cc=sstep(.75,.9,c);r+=.1*cc;g+=.13*cc;b+=.18*cc;                 /* cool card: the blue sheen over the iris's left half */
   d[o]=r;d[o+1]=g;d[o+2]=b;}
  eng.setEnvMap({data:d,w,h,intensity:1});}
-eng.setTerrain(buildGrid(()=>-400),{mode:'meadow',skirt:false,water:false});
+eng.setTerrain(buildGrid(()=>-1500),{mode:'meadow',skirt:false,water:false});
 /* the key light is the sun, placed where the softbox is (up-left, in front): the projector relief self-shadows against it */
-eng.setTimeOfDay(Q.has('el')?+Q.get('el'):24.8,Q.has('az')?+Q.get('az'):133.2,0);eng.setClouds({coverage:0,shadows:0});eng.setSky({stars:0,moon:false,aurora:0});
+eng.setTimeOfDay(Q.has('el')?+Q.get('el'):36,Q.has('az')?+Q.get('az'):133.2,0);eng.setClouds({coverage:0,shadows:0});eng.setSky({stars:0,moon:false,aurora:0});
 eng.setFog({density:0,volumetric:0});eng.setGround({albedo:[.02,.015,.012]});
 
 /* ---------- helpers ---------- */
@@ -152,21 +152,43 @@ if(Q.get('cornea')!=='0')addE(revolve(cor,128,false),[0,0,0],{a:[1,1,1],m:0,r:.0
 /* ---------- lids and lashes ---------- */
 /* eyelids: two skin sheets that hug the eyeball and leave an almond-shaped opening. Each sheet starts with a rounded, wet
    margin rolling back onto the eye, then rises over the globe (upper lid crease, thicker skin away from the margin). Metric uvs. */
-const FX=9.6;                                                    /* eye corners */
-const lidU=x=>{const q=Math.max(0,1-(x/FX)**2);return 4.35*Math.pow(q,.55)+.25*x/FX;};   /* upper margin (slightly higher at the outer corner) */
+const FX=7.7;                                                    /* eye corners */
+const lidU=x=>{const q=Math.max(0,1-(x/FX)**2);return 4.35*Math.pow(q,.55)+.25*x/FX*Math.min(1,q*8);};   /* upper margin (slightly higher at the outer corner) */
 const lidL=x=>{const q=Math.max(0,1-(x/FX)**2);return -3.2*Math.pow(q,.7);};
-const eyeZ0=(x,y)=>{const r2=x*x+y*y;return r2<63.5?SC[2]+Math.sqrt(64-r2):SC[2]+Math.sqrt(.5)-(Math.sqrt(r2)-Math.sqrt(63.5))*.45;};
+const browYc=x=>18.4+1.9*Math.exp(-Math.pow((x-3)/8.5,2))-.035*Math.pow(Math.max(0,x-9),2);
+/* the face around the orbit (skin-free height; the lid sheets add their thickness): temples curve back, a hollow under the brow,
+   the brow ridge in front, the cheek below. The globe sits inside it - only the open eye shows the ball */
+function faceZ(x,y){return .3-.009*x*x
+ +2.6*Math.exp(-Math.pow((y-browYc(x))/3.4,2))*Math.exp(-Math.pow(x/17,4))-.06*Math.max(0,y-21)*(y-21)*.1
+ -.9*Math.exp(-Math.pow((y-11.5)/2.6,2))*Math.exp(-Math.pow(x/12,4))
+ +1.5*Math.exp(-Math.pow((y+15)/4.5,2))*Math.exp(-Math.pow(x/18,4));}
+/* skin over the eye = smooth maximum of the globe and the face (no crater), with canthal hollows: at the eye corners the skin
+   folds in toward the globe */
+const eyeZ0=(x,y)=>{const r2=x*x+y*y,r=Math.sqrt(r2),sp=r2<63.5?SC[2]+Math.sqrt(64-r2):SC[2]+Math.sqrt(.5)-(r-Math.sqrt(63.5))*.45;
+ const dip=3.6*Math.exp(-Math.pow((Math.abs(x)-FX)/2.4,2)-Math.pow(y/2.6,2))+.9*Math.exp(-Math.pow(x/6,2)-Math.pow((y-6)/2.2,2))*0;
+ const f=faceZ(x,y)-dip,k=.55,m=Math.max(sp,f);return m+k*Math.log(Math.exp((sp-m)/k)+Math.exp((f-m)/k));};
 /* the lids ride over the cornea's bulge too (softened), so a closed lid never lets the cornea poke through */
 const eyeZ=(x,y)=>{const r2=x*x+y*y,a=eyeZ0(x,y);if(r2>=4.6*4.6)return a;const c=CC+Math.sqrt(CR*CR-r2)+.12,k=.35;const h=Math.max(k-Math.abs(a-c),0)/k;return Math.max(a,c)+h*h*k*.25;};
-function lidSheet(edge,dir,crease,fold){fold=fold||.18;const NX=96,NT=40,vb=[],ib=[];
- for(let j=0;j<=NT;j++){for(let i=0;i<=NX;i++){const x=(i/NX-.5)*32,y0=edge(x);let y,z;
+/* ---- face around the eye: brow ridge and cheek. Static surfaces in absolute (x, y), so the brow does not slide with a blink.
+   The eye sits deep: above the lid the skin falls back into the sulcus, then rises forward onto a brow ridge that overhangs it. ---- */
+const SX=34;                                                     /* half width of the skin sheets */
+
+const browY=browYc;     /* brow centre line: arch peaks laterally, tail drops */
+function browZ(x,y){return faceZ(x,y)+1.88;}
+function cheekZ(x,y){return faceZ(x,y)+1.88;}
+function lidSheet(edge,dir,crease,fold){fold=fold||.18;const NX=176,NT=40,NE=dir>0?22:10,vb=[],ib=[];
+ for(let j=0;j<=NT+NE;j++){for(let i=0;i<=NX;i++){const x=(i/NX-.5)*2*SX,y0=edge(x);let y,z;
    if(j<6){const a=j/5*Math.PI/2,e=Math.sin(a);                   /* margin roll: from the eye surface out to the lid front, meeting it tangentially */
-    y=y0-dir*.14*Math.sin(a*2)+dir*.12*e*e;z=eyeZ(x,y0)+.08+1.05*(1-Math.cos(a));}
-   else{const t=(j-5)/(NT-5),far=dir>0?13:-13;y=y0+(far-y0)*Math.pow(t,1.35);
-    const T=1.13+.75*t-crease*Math.exp(-Math.pow((t-.3)/.06,2))+fold*Math.exp(-Math.pow((t-.4)/.1,2));
+    const c=Math.min(1,Math.max(0,(Math.abs(x)-FX+.7)/1.2)),cc=c*c*(3-2*c);
+    /* past the corners the upper sheet laps 1 m over the lower one (no seam, no slit) */
+    y=y0+(1-cc)*(-dir*.14*Math.sin(a*2)+dir*.12*e*e)-(dir>0?cc*(1-j/5)*1.1:0);z=eyeZ(x,y)+(1-cc)*(.08+1.05*(1-Math.cos(a)))+cc*(1.13+(dir>0?.012:0));}
+   else if(j<=NT){const t=(j-5)/(NT-5),far=dir>0?13:-13;y=y0+(far-y0)*Math.pow(t,1.35);
+    const kx=Math.exp(-Math.pow(Math.max(0,Math.abs(x)-FX*.9)/2.2,2));   /* crease and fold belong to the lid: they fade out past the corners */
+    const T=1.13+.75*t-kx*crease*Math.exp(-Math.pow((t-.3)/.06,2))+kx*fold*Math.exp(-Math.pow((t-.4)/.1,2));
     z=eyeZ(x,y)+T;}
-   vb.push(x,y,z,0,0,0,(x+16)/32,j/NT);}}
- for(let j=0;j<NT;j++)for(let i=0;i<NX;i++){const a=j*(NX+1)+i,b=a+NX+1;if(dir>0)ib.push(a,a+1,b,a+1,b+1,b);else ib.push(a,b,a+1,a+1,b,b+1);}
+   else{const k=(j-NT)/NE;y=dir>0?13+14*k:-13-7*k;z=dir>0?browZ(x,y):cheekZ(x,y);}
+   vb.push(x,y,z,0,0,0,(x+SX)/(2*SX),j<=NT?j/NT*.8:.8+.19*(j-NT)/NE);}}
+ for(let j=0;j<NT+NE;j++)for(let i=0;i<NX;i++){const a=j*(NX+1)+i,b=a+NX+1;if(dir>0)ib.push(a,a+1,b,a+1,b+1,b);else ib.push(a,b,a+1,a+1,b,b+1);}
  return weldNormals({vb:new Float32Array(vb),ib:new Uint32Array(ib)});}
 /* subsurface: modelA scales the curvature into the pre-integrated skin LUT (this world is ~650x real size, so real-lid curvature needs a big gain);
    transmission lets the key glow red through the thin lid margin when it is back-lit */
@@ -185,7 +207,7 @@ if(typeof document!=='undefined'&&document.createElement){const im=new Image();i
  const W=1536,H=768,N=W*H,albedo=new Uint8Array(N*4),orm=new Uint8Array(N*4),normal=new Uint8Array(N*4),h=new Float32Array(N),RO=new Float32Array(N);
  const TW=10,TH=TW*PH/PW,LV=10;                          /* plate tile: 10 m wide (a real lid is ~1.5 plates wide); lid v spans ~10 m */
  const tap=(x,y)=>{x=((x%PW)+PW)%PW;y=((y%PH)+PH)%PH;return ((Math.floor(y)*PW+Math.floor(x)));};
- for(let y=0;y<H;y++){const v=y/(H-1),my=v*LV;for(let x=0;x<W;x++){const u=x/(W-1),mx=u*32-16,i=y*W+x;
+ for(let y=0;y<H;y++){const v=Math.min(1.2,y/(H-1)/.8),my=y/(H-1)*LV/.8;for(let x=0;x<W;x++){const u=x/(W-1),mx=u*2*SX-SX,i=y*W+x;
   const k=tap(mx/TW*PW,my/TH*PH),pl=PL[k]/pm;                               /* photo grain, ~1 */
   /* micro-wrinkles: two families of fine wavy lines (along the lid, and diagonal), broken up by noise; plus tiny pores */
   const w1=fbmT(mx*.6,my*.6,19,2),w2=fbmT(mx*.9+7,my*.9,29,2);
@@ -201,8 +223,9 @@ if(typeof document!=='undefined'&&document.createElement){const im=new Image();i
   /* colour */
   let r=pp[k*4]/255,g=pp[k*4+1]/255,b=pp[k*4+2]/255;r=r*r*.9+r*.1;g=g*g*.9+g*.1;b=b*b*.9+b*.1;   /* ~linear */
   const blot=fbmT(mx*.25+11,my*.25,8,4)-.5,blot2=fbmT(mx*.9,my*.9+5,29,3)-.5;
-  const marg=Math.exp(-v/.05),inner=1/(1+Math.exp((mx+6.5)*1.2))*Math.exp(-v/.35);
-  const crease=Math.exp(-Math.pow((v-.31)/.07,2));
+  const lidk=Math.exp(-Math.pow(Math.max(0,Math.abs(mx)-FX*.9)/2.2,2));   /* lid-only features fade out past the eye corners */
+  const marg=Math.exp(-v/.05)*lidk,inner=1/(1+Math.exp((mx+6.5)*1.2))*Math.exp(-v/.35);
+  const crease=Math.exp(-Math.pow((v-.31)/.07,2))*lidk;
   const vein=.7*Math.pow(Math.max(0,1-Math.abs(fbmT(mx*.18+2,my*.18,6,4)-.5)*9),4)*Math.max(0,Math.min(1,(v-.08)*6))*(1-crease*.5);
   let R_=r*(1+.2*blot+.08*blot2+.2*marg+.25*inner),G_=g*(1-.1*blot+.03*blot2-.16*marg-.12*inner),B_=b*(1-.06*blot-.1*marg-.06*inner);
   R_*=1-.2*crease;G_*=1-.26*crease;B_*=1-.16*crease;                         /* crease: a little darker, cooler */
@@ -222,11 +245,11 @@ const lidY=x=>curUp(x)+.1,lidZ=x=>eyeZ(x,curUp(x))+.25;            /* lash roots
 /* ~170 lashes rooted along the upper lid margin: they leave forward and down, then curl up; thin, tapering, glossy */
 /* upper lashes grow in clumps: 2-5 hairs from neighbouring roots whose tips converge; 3 rows deep along the margin, thick at the
    root and tapering to a fine tip, longer and more curled toward the outer corner (+x) */
-const LASH=[];{let x=-8.7;while(x<8.7){const n=2+Math.floor(rnd()*4),out=(x+8.7)/17.4,Lc=(1.9+1.9*Math.pow(out,1.3))*(1-.5*Math.pow(Math.abs(x)/9.2,6))*(.85+.3*rnd());
+const LASH=[];{let x=-FX*.93;while(x<FX*.93){const n=2+Math.floor(rnd()*4),out=(x+FX*.93)/(FX*1.86),Lc=(1.9+1.9*Math.pow(out,1.3))*(1-.5*Math.pow(Math.abs(x)/(FX*.97),6))*(.85+.3*rnd());
   const side=(x*.035+(rnd()-.5)*.3),curl=.9+.8*rnd()+.5*out,tip=[(rnd()-.5)*.25,0];
   for(let k=0;k<n;k++){const xr=x+(k-(n-1)/2)*.07+(rnd()-.5)*.05;LASH.push({x:xr,row:Math.floor(rnd()*3),L:Lc*(.82+.3*rnd()),side:side+(x-xr)*.6+tip[0],curl,conv:.6+.3*rnd(),tx:x+tip[0]});}
   x+=.16+.14*rnd();}}
-const LOW=[];for(let k=0;k<64;k++){const x=-7.4+14.4*(k+rnd()*.7)/64;LOW.push({x,L:.55+.6*rnd()*(1-Math.abs(x)/9),side:x*.04+(rnd()-.5)*.4});}
+const LOW=[];for(let k=0;k<64;k++){const x=-FX*.78+FX*1.5*(k+rnd()*.7)/64;LOW.push({x,L:.55+.6*rnd()*(1-Math.abs(x)/(FX*.95)),side:x*.04+(rnd()-.5)*.4});}
 let curLo=lidL;
 function buildLashes(close){const l=[];
  for(const q of LASH){const b=[q.x,lidY(q.x)-.05-q.row*.06,lidZ(q.x)+.62+q.row*.12-.3*close];
@@ -239,15 +262,33 @@ function buildLashes(close){const l=[];
   for(let i=0;i<6;i++){pts.push(p.slice());d=v3.norm(v3.add(d,[0,-.05,.05]));p=v3.add(p,v3.mul(d,q.L/5));}
   l.push(tube(pts,t=>.018*Math.pow(1-t,1.2)+.002,4));}
  /* the lash line: a dark band of roots along the upper margin */
- const ml=[];for(let x=-8.9;x<=8.9;x+=.3)ml.push([x,lidY(x)-.08,lidZ(x)+.6-.25*close]);
+ const ml=[];for(let x=-FX*.95;x<=FX*.95;x+=.3)ml.push([x,lidY(x)-.08,lidZ(x)+.6-.25*close]);
  l.push(tube(ml,t=>.17*Math.pow(Math.sin(Math.PI*Math.min(1,Math.max(0,t))),.35)+.02,6));
  return mergeAll(l);}
 const lashObj=add(buildLashes(0),[0,0,0],{a:[.016,.012,.01],m:0,r:.32,clearcoat:.8,clearcoatRough:.12,noProject:true},{castShadow:true});
+/* ---- eyebrow: ~1400 hairs on the brow ridge. Growth direction follows a real brow: steeply up at the head (nose side, -x),
+   sweeping outward along the body with the upper and lower rows converging on the midline, angling down along the tail.
+   Hairs leave the skin at a shallow angle and lie back onto it; thick root, fine tip; a little colour variation. ---- */
+const brow=(()=>{const parts=[],sn=(x,y)=>{const e=.05,zx=(browZ(x+e,y)-browZ(x-e,y))/(2*e),zy=(browZ(x,y+e)-browZ(x,y-e))/(2*e);return v3.norm([-zx,-zy,1]);};
+ const X0=-12.5,X1=15.5;let n=0;
+ while(n<1400){const x=X0+(X1-X0)*rnd(),u=(x-X0)/(X1-X0);
+  const hw=2.5*(1-u)+.6*u+.35*Math.sin(u*Math.PI),yy=(rnd()*2-1);if(rnd()>Math.pow(1-Math.abs(yy),.6)*(u<.08?u/.08:1))continue;
+  const y=browY(x)+yy*hw;n++;
+  let ang=u<.12?80:u<.3?80-(u-.12)/.18*62:u<.75?18:18-(u-.75)/.25*38;     /* degrees from +x */
+  ang+=-yy*14+(rnd()-.5)*16;
+  const a=ang*DEG,tdir=[Math.cos(a),Math.sin(a)],L=(2.4+2.6*rnd())*(u<.12?.75:1);
+  let p=[x,y,browZ(x,y)],nrm=sn(x,y);const pts=[p.slice()];
+  for(let k=1;k<6;k++){const lift=(.32-.06*k)*(.7+.6*rnd());const tg=v3.norm([tdir[0],tdir[1],0]);
+   const t3=v3.norm(v3.sub(tg,v3.mul(nrm,v3.dot(tg,nrm))));const d=v3.norm(v3.add(v3.mul(t3,Math.cos(lift)),v3.mul(nrm,Math.sin(lift))));
+   p=v3.add(p,v3.mul(d,L/5));const sz=browZ(p[0],p[1]);if(p[2]<sz+.04)p[2]=sz+.04;pts.push(p.slice());nrm=sn(p[0],p[1]);}
+  parts.push(tube(pts,t=>.034*Math.pow(1-t,1.2)+.004,3));}
+ return mergeAll(parts);})();
+add(brow,[0,0,0],{a:[.035,.024,.017],m:0,r:.42,clearcoat:.5,clearcoatRough:.18,noProject:true},{castShadow:true});
 /* face beyond: a dark skin shell so orbiting never shows the void */
-add(revolve([[0,-30],[14,-26],[22,-14],[26,-2],[28,6]],64,true),[0,0,0],{a:[.05,.025,.02],m:0,r:.6,mode:'skin',noProject:true},{castShadow:false});
+add(revolve([[0,-46],[20,-42],[30,-30],[34,-18],[36,-12]],64,true),[0,0,0],{a:[.05,.025,.02],m:0,r:.6,mode:'skin',noProject:true},{castShadow:false});
 
 /* black studio walls all round (seen from inside; no shadow, so the sun key still reaches the eye) */
-if(Q.get('studio')!=='0')add(revolve((()=>{const p=[];for(let k=0;k<=24;k++){const ph=Math.PI*k/24;p.push([70*Math.sin(ph),-70*Math.cos(ph)]);}return p;})(),48,true),[0,0,0],{a:[.006,.005,.005],m:0,r:1,noProject:true},{castShadow:false});
+if(Q.get('studio')!=='0')add(revolve((()=>{const p=[];for(let k=0;k<=24;k++){const ph=Math.PI*k/24;p.push([600*Math.sin(ph),-600*Math.cos(ph)]);}return p;})(),48,true),[0,0,0],{a:[.006,.005,.005],m:0,r:1,noProject:true},{castShadow:false});
 /* ---------- light: the softbox as a big sphere light, a dim warm kicker from the right ---------- */
 const keyPos=v3.mul(v3.norm([-.62,.42,.66]),18);
 eng.addLight({type:'sphere',radius:5,pos:keyPos,color:[1,.96,.9],intensity:Q.has('key')?+Q.get('key'):20,range:60});   /* soft wrap around the sun key */
@@ -256,8 +297,8 @@ eng.addLight({type:'point',pos:[22,-6,18],color:[1,.6,.35],intensity:40,range:80
 /* ---------- bounce sources that only reach the eye through VXGI (no direct light of their own):
    a gold reflector card under the eye, catching the sun key and throwing warm light up under the lids and into the pupil;
    a teal practical panel off to the right, whose glow wraps the skin, sclera and lashes. Toggle GI to see them vanish. ---------- */
-add(genBox(22,.3,10),[0,-8.6,7.5],{a:[.95,.72,.38],m:0,r:.9,noProject:true},{rot:[-.55,0,0],castShadow:false});
-add(genBox(.3,9,9),[11.5,1,6],{a:[.02,.02,.02],m:0,r:.9,emissive:Q.has('em')?[.2,.9,1].map(v=>v*+Q.get('em')):[1,2.4,2.8],noProject:true},{rot:[0,-.75,0],castShadow:false});
+add(genBox(30,.3,14),[0,-22,16],{a:[.95,.72,.38],m:0,r:.9,noProject:true},{rot:[-.55,0,0],castShadow:false});
+add(genBox(.3,16,16),[34,2,18],{a:[.02,.02,.02],m:0,r:.9,emissive:Q.has('em')?[.2,.9,1].map(v=>v*+Q.get('em')):[3,7,8],noProject:true},{rot:[0,-.75,0],castShadow:false});
 /* ---------- global illumination: VXGI clipmap centred on the eye ---------- */
 const giOn=Q.get('gi')!=='0';
 /* clipmap: 4 nested levels from a 20 m finest span (the lids, card and panel all inside level 1), strong single bounce, glossy cone on */
@@ -319,9 +360,9 @@ function makeOrbit(canvas,o){
   const f=v3.norm(v3.sub(tg,p)),rr=v3.norm(v3.cross(f,[0,1,0])),uu=v3.cross(rr,f);basis={r:rr,u:uu};};
  st.film=film;st.free=()=>setMode('free');return st;}
 
-const orbit=makeOrbit($('c'),{minZoom:.25,maxZoom:2.2,floorY:-40,onMode:m=>{$('bMode').textContent=m==='film'?'Film':'Free';},
+const orbit=makeOrbit($('c'),{minZoom:.25,maxZoom:3.8,floorY:-40,onMode:m=>{$('bMode').textContent=m==='film'?'Film':'Free';},
  /* [t, yaw, pitch, zoom, pan] around the photo's own camera */
- film:{dur:56,keys:[[0,0,0,1],[7,0,0,.97],[15,.05,.02,.5,[.68,-.34,0]],[23,.62,-.12,.62,[.4,-.2,0]],[31,.5,.42,.78,[.3,.6,0]],[39,-.55,.25,.55,[-.5,.4,0]],[47,-.25,-.1,.85,[0,0,0]]]}});
+ film:{dur:66,keys:[[0,0,0,1],[7,0,0,.97],[15,.05,.02,.5,[.68,-.34,0]],[23,.62,-.12,.62,[.4,-.2,0]],[31,.5,.42,.78,[.3,.6,0]],[39,-.55,.25,.55,[-.5,.4,0]],[46,-.2,.06,1.6,[0,2.5,0]],[53,.18,.1,3.3,[1,8.5,0]],[59,.05,0,2.2,[0,4,0]]]}});
 let T=0;
 let giSlow=false;
 /* ---------- life: calm gaze (fixations, main-sequence saccades with a glissade, drift, tremor) and natural blinks ---------- */
