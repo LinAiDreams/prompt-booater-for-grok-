@@ -3968,7 +3968,7 @@ function gtPoll(){if(!tq)return;
   if(!dis&&ns>0){const ms=ns/1e6;GT[it.tag]=GT[it.tag]?GT[it.tag]*.9+ms*.1:ms;}}
  if(GT.pend.length>8){GT.pend.forEach(i=>gl.deleteQuery(i.q));GT.pend.length=0;}}
 const gov={hot:0,hist:[],good:0,hold:0,cap:1,capUntil:0,raised:0,pre:0,preScale:0,chk:0,tierCap:2,tierUntil:0};
-const PIXEL_FLOOR=/(Mobi|Android)/i.test(navigator.userAgent)?.5:.6;
+const PIXEL_FLOOR=opts.minScale||(/(Mobi|Android)/i.test(navigator.userAgent)?.5:.6);   /* opts.minScale: the governor never renders below this scale (it cuts tier / caps fps instead) */
 function dropTier(now,why){if(tierIdx>0){tierIdx--;gov.tierCap=tierIdx;gov.tierUntil=now+60000;applyTier();gov.why=why;}}
 function governor(dtMs,now){
  if(qMode!=='auto')return;gov.hist.push(dtMs);if(gov.hist.length>40)gov.hist.shift();
@@ -12714,7 +12714,7 @@ const $=id=>document.getElementById(id),errBox=$('err');
 const fail=m=>{errBox.style.display='block';errBox.textContent+=m+'\n';console.error(m);};
 addEventListener('error',e=>fail('JS: '+e.message+' (line '+e.lineno+')'));
 const Q=new URLSearchParams(location.search);
-const eng=createEngine({canvas:$('c'),onError:fail,onStats:s=>{$('stat').textContent=s;},
+const eng=createEngine({canvas:$('c'),minScale:.8,onError:fail,onStats:s=>{$('stat').textContent=s;},
  onFirstFrame:()=>{$('load').style.opacity='0';setTimeout(()=>{$('load').style.display='none';},900);}});
 if(!eng)return;
 const cam=eng.camera;
@@ -12732,7 +12732,7 @@ const HERO={pos:[PC[0],PC[1],PD],target:[PC[0],PC[1],0],fov:PFOV};
  for(let j=0;j<h;j++)for(let i=0;i<w;i++){const u=i/w,v=j/h,o=(j*w+i)*3,lon=(u-.5)*TAU,th=v*Math.PI,dir=[Math.sin(th)*Math.cos(lon),Math.cos(th),Math.sin(th)*Math.sin(lon)];
   let r=.004,g=.0035,b=.004;
   const k=v3.dot(dir,box),c=v3.dot(dir,card);
-  const sb=sstep(.955,.975,k);r+=60*sb;g+=57*sb;b+=53*sb;              /* softbox: a bright disc, soft rim */
+  const sb=sstep(.984,.992,k);r+=140*sb;g+=134*sb;b+=125*sb;              /* softbox: a bright disc, soft rim */
   const halo=Math.pow(Math.max(k,0),24);r+=.5*halo;g+=.45*halo;b+=.4*halo;
   const cc=sstep(.75,.9,c);r+=.1*cc;g+=.13*cc;b+=.18*cc;                 /* cool card: the blue sheen over the iris's left half */
   d[o]=r;d[o+1]=g;d[o+2]=b;}
@@ -12760,11 +12760,67 @@ function tube(pts,rad,seg){const vb=[],ib=[],n=pts.length;
 function mergeAll(list){let nv=0,ni=0;for(const g of list){nv+=g.vb.length/8;ni+=g.ib.length;}const vb=new Float32Array(nv*8),ib=new Uint32Array(ni);let ov=0,oi=0;
  for(const g of list){vb.set(g.vb,ov*8);for(let k=0;k<g.ib.length;k++)ib[oi+k]=g.ib[k]+ov;ov+=g.vb.length/8;oi+=g.ib.length;}return {vb,ib};}
 
+/* ---------- procedural maps: skin (pores, fine creases, blotchy colour) and sclera (conjunctival vessels) ---------- */
+function hash2(x,y){let h=(x*374761393+y*668265263)|0;h=Math.imul(h^(h>>>13),1274126177);return ((h^(h>>>16))>>>0)/4294967296;}
+function vnoiseT(x,y,P){const xi=Math.floor(x),yi=Math.floor(y),fx=x-xi,fy=y-yi,u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+ const w=(a,b)=>hash2(((a%P)+P)%P,((b%P)+P)%P);return (w(xi,yi)*(1-u)+w(xi+1,yi)*u)*(1-v)+(w(xi,yi+1)*(1-u)+w(xi+1,yi+1)*u)*v;}
+function fbmT(x,y,P,o){let s=0,a=.5,f=1;for(let i=0;i<o;i++){s+=a*vnoiseT(x*f,y*f,P*f);a*=.5;f*=2;}return s;}
+/* pack height + colour + roughness fields into the engine's map array (normal from the height gradient, tileable) */
+function packMaps(N,H,col,rough,nk){const albedo=new Uint8Array(N*N*4),orm=new Uint8Array(N*N*4),normal=new Uint8Array(N*N*4);
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x,o=i*4,hx=H[y*N+(x+1)%N]-H[y*N+(x+N-1)%N],hy=H[((y+1)%N)*N+x]-H[((y+N-1)%N)*N+x];
+  let nx=-hx*nk,ny=-hy*nk;const l=Math.hypot(nx,ny,1);nx/=l;ny/=l;
+  albedo[o]=col[i*3];albedo[o+1]=col[i*3+1];albedo[o+2]=col[i*3+2];albedo[o+3]=255;
+  orm[o]=Math.round(255*Math.min(1,.55+H[i]*.6));orm[o+1]=Math.round(255*rough[i]);orm[o+2]=0;orm[o+3]=Math.round(255*H[i]);
+  normal[o]=Math.round((nx*.5+.5)*255);normal[o+1]=Math.round((ny*.5+.5)*255);normal[o+2]=255;normal[o+3]=255;}
+ return eng.createMaps({w:N,h:N,albedo,orm,normal});}
+function skinMaps(){const N=512,H=new Float32Array(N*N),col=new Uint8Array(N*N*3),ro=new Float32Array(N*N),C=64;
+ const pts=[];for(let j=0;j<C;j++)for(let i=0;i<C;i++)pts.push([(i+hash2(i,j*7+1))/C,(j+hash2(i*3+5,j))/C,.35+.65*hash2(i+11,j+29)]);
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const u=x/N,v=y/N,ci=Math.floor(u*C),cj=Math.floor(v*C);let pore=0;
+  for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const ii=(ci+di+C)%C,jj=(cj+dj+C)%C,p=pts[jj*C+ii];
+   let dx=u-(p[0]+(ci+di-ii)/C),dy=v-(p[1]+(cj+dj-jj)/C);const d2=(dx*dx+dy*dy)*C*C;if(p[2]>.55)pore=Math.max(pore,(p[2]-.45)*1.6*Math.exp(-d2/(.03*p[2])));}   /* irregular: some pores missing, depth varies */
+  const fine=fbmT(u*64,v*64,64,3),warp=fbmT(u*6,v*6,6,3);
+  /* creases run along the lid (u), wavering; plus a finer cross-hatch of skin lines */
+  const cr=.55*Math.pow(Math.abs(Math.sin((v*7+warp*1.2)*Math.PI)),40)+.35*Math.pow(Math.abs(Math.sin((v*19+u*3+warp*2.)*Math.PI)),60)
+   +.3*Math.pow(Math.abs(Math.sin((u*13-v*9+warp*2.5)*Math.PI)),70);
+  const h=.62+.2*(fine-.5)-.3*pore-.24*Math.min(cr,1);H[y*N+x]=Math.max(0,Math.min(1,h));
+  const bl=fbmT(u*5+3,v*5,5,4),fr=Math.pow(fbmT(u*40,v*40+9,40,2),6)*3;
+  const k=1-.1*pore-.12*Math.min(cr,1)-.1*fr-.06*(fine-.5);
+  col[(y*N+x)*3]=Math.round(Math.min(255,(196+26*bl)*k));col[(y*N+x)*3+1]=Math.round((146+12*(1-bl))*k*(1-.05*bl));col[(y*N+x)*3+2]=Math.round((128+8*(1-bl))*k);
+  ro[y*N+x]=Math.min(1,.82+.18*pore+.1*Math.min(cr,1)+.08*(fine-.5));}   /* multiplier on the material roughness */
+ return packMaps(N,H,col,ro,9);}
+function scleraMaps(){const N=512,V=new Float32Array(N*N),H=new Float32Array(N*N),col=new Uint8Array(N*N*3),ro=new Float32Array(N*N);
+ let s=7;const R=()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};
+ /* vessels: random walks from the back of the eye (v = 1) toward the limbus (v = 0), branching and thinning as they go */
+ const stamp=(x,y,w,a)=>{const r=Math.ceil(w*2+1);for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const d=Math.hypot(dx,dy);if(d>w*2+.5)continue;
+  const X=((Math.round(x)+dx)%N+N)%N,Y=Math.round(y)+dy;if(Y<0||Y>=N)continue;V[Y*N+X]=Math.max(V[Y*N+X],a*Math.exp(-d*d/(w*w*1.4+.3)));}};
+ const walk=(x,y,ang,w,a,depth)=>{for(let k=0;k<420&&y>N*.04&&w>.35;k++){ang+=(R()-.5)*.5;x+=Math.cos(ang)*1.5;y+=Math.sin(ang)*1.5-.25;
+  ang+=(-Math.PI/2-ang)*.02;stamp(x,y,w,a);w*=.997;a*=.999;if(depth<4&&R()<.012){walk(x,y,ang+(R()<.5?-1:1)*(.5+R()*.6),w*.7,a*.9,depth+1);}}};
+ for(let i=0;i<34;i++)walk(R()*N,N-1-R()*30,-Math.PI/2+(R()-.5)*.8,1.2+R()*1.4,.3+.35*R(),0);
+ /* soften: 2 box-blur passes so vessels read as blurred capillaries under the conjunctiva, not printed lines */
+ for(let pass=0;pass<2;pass++){const T=V.slice();for(let y=1;y<N-1;y++)for(let x=0;x<N;x++){let a=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)a+=T[(y+dy)*N+(x+dx+N)%N];V[y*N+x]=a/9;}}
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x,v=y/N,u=x/N,vs=V[i],mott=fbmT(u*12,v*12,12,4);
+  H[i]=.5+.25*vs+.06*(mott-.5);
+  const tint=Math.min(1,v*1.3),mott2=fbmT(u*5,v*5,5,3);   /* whiter at the limbus, a little pinker and yellower toward the back */
+  const base=[232-16*tint-6*mott2,222-24*tint-6*mott2,210-36*tint-6*mott2];
+  const vc=[150,34,30];col[i*3]=Math.round(base[0]*(1-vs)+vc[0]*vs);col[i*3+1]=Math.round(base[1]*(1-vs)+vc[1]*vs);col[i*3+2]=Math.round(base[2]*(1-vs)+vc[2]*vs);
+  ro[i]=.85+.15*mott;}
+ return packMaps(N,H,col,ro,6);}
+/* lid: a swept tube with metric uvs (repeats every 3 m) and a fold: radius grows into a soft crease above the margin */
+function lidTube(pts,R0,seg,crease,a0){const vb=[],ib=[],n=pts.length;let L=0;
+ for(let i=0;i<n;i++){if(i)L+=v3.len(v3.sub(pts[i],pts[i-1]));const a=pts[Math.max(i-1,0)],b=pts[Math.min(i+1,n-1)],t=v3.norm(v3.sub(b,a)),s=v3.norm(v3.cross(t,[0,1,0])),u=v3.cross(s,t);
+  const taper=Math.min(1,(1-Math.abs(i/(n-1)*2-1))*4);
+  for(let j=0;j<=seg;j++){const an=j/seg*TAU,da=Math.atan2(Math.sin(an-a0),Math.cos(an-a0));
+   const r=R0*(.55+.45*taper)*(1+crease*Math.exp(-da*da/.08)-crease*.6*Math.exp(-Math.pow(da-.42,2)/.02)+.012*Math.sin(an*7+L*.8));
+   const nn=v3.add(v3.mul(s,Math.cos(an)),v3.mul(u,Math.sin(an)));vb.push(...v3.add(pts[i],v3.mul(nn,r)),...nn,L/1.2,an*R0/1.2);}}
+ for(let i=0;i<n-1;i++)for(let j=0;j<seg;j++){const a=i*(seg+1)+j,b=a+seg+1;ib.push(a,a+1,b,a+1,b+1,b);}
+ return weldNormals({vb:new Float32Array(vb),ib:new Uint32Array(ib)});}
+const SKIN=skinMaps(),SCLERA=scleraMaps();
+
 /* ---------- the iris: a polar mesh displaced by the photo's relief ---------- */
 const HM=b64bytes(IRIS_H.b64),NA=IRIS_H.na,NR=IRIS_H.nr;
 const hAt=(ia,ir)=>HM[Math.min(Math.max(ir,0),NR-1)*NA+((ia%NA)+NA)%NA]/255;
 const irisBase=rho=>.5*Math.pow(1-rho,2)+.06*Math.exp(-Math.pow((rho-.33)/.07,2));   /* pupillary zone pushed forward by the lens, a soft collarette */
-const irisZ=(rho,h)=>irisBase(rho)+.24*(h-.5)*sstep(1,.86,rho)*sstep(0,.04,rho);
+const irisZ=(rho,h)=>irisBase(rho)+.15*(h-.5)*sstep(1,.86,rho)*sstep(0,.04,rho);
 const iris=(()=>{const SA=512,SR=NR,vb=new Float32Array((SA+1)*SR*8),ib=[];
  for(let j=0;j<SR;j++){const rho=j/(SR-1),r=RP+(RI-RP)*rho;
   for(let i=0;i<=SA;i++){const a=i/SA*TAU,ia=Math.round(i/SA*NA);
@@ -12773,7 +12829,7 @@ const iris=(()=>{const SA=512,SR=NR,vb=new Float32Array((SA+1)*SR*8),ib=[];
    const o=(j*(SA+1)+i)*8;vb[o]=Math.cos(a)*r;vb[o+1]=Math.sin(a)*r;vb[o+2]=irisZ(rho,h);vb[o+6]=i/SA;vb[o+7]=rho;}}
  for(let j=0;j<SR-1;j++)for(let i=0;i<SA;i++){const a=j*(SA+1)+i,b=a+SA+1;ib.push(a,b,a+1,a+1,b,b+1);}
  return weldNormals({vb,ib:new Uint32Array(ib)});})();
-add(iris,[0,0,0],{a:[.36,.15,.05],m:0,r:.82});
+add(iris,[0,0,0],{a:[.36,.15,.05],m:0,r:.72,fuzz:.35});   /* velvety stroma, not a glossy shell */
 /* pupil: the iris's inner lip rolls back into a dark well; the lens behind it is a faint glossy dome */
 const z0=irisBase(0);
 add(revolve([[RP*.97,-1.6],[RP*.98,-.8],[RP,z0-.15],[RP*1.01,z0]],96,false),[0,0,0],{a:[0,0,0],specular:[.0,.0,.0],glossiness:0,noProject:true});
@@ -12781,7 +12837,7 @@ add(revolve([[0,-1.15],[RP*.5,-1.22],[RP*.99,-1.45]],64,false),[0,0,0],{a:[0,0,0
 /* sclera: the eyeball (radius 8 m, centre 6.9 m behind the iris plane) with the limbus opening */
 const SC=[0,0,-6.9],SRAD=8,ph0=Math.asin(RI/SRAD);
 const scl=[];for(let k=0;k<=48;k++){const ph=ph0+(Math.PI*.75-ph0)*k/48;scl.push([SRAD*Math.sin(ph),SC[2]+SRAD*Math.cos(ph)]);}
-add(revolve(scl,128,false),[0,0,0],{a:[.42,.34,.28],m:0,r:.32,clearcoat:.6,clearcoatRough:.12,sheen:.2,sheenColor:[1,.85,.8]});
+add(revolve(scl,128,false),[0,0,0],{a:[1,1,1],maps:SCLERA,uvScale:1,m:0,r:.35,clearcoat:.8,clearcoatRough:.08});
 /* limbal ring: a slightly darker ring where iris meets sclera */
 add(revolve([[RI*.985,.02],[RI*1.03,-.05]],128,false),[0,0,0],{a:[.12,.07,.05],m:0,r:.5});
 /* cornea: a clear dome (radius 5.2 m) refracting the iris */
@@ -12789,15 +12845,29 @@ const CC=-2.8,CR=5.2,cmax=Math.asin(4.3/CR),cor=[];for(let k=0;k<=40;k++){const 
 if(Q.get('cornea')!=='0')add(revolve(cor,128,false),[0,0,0],{a:[1,1,1],m:0,r:.02,transparent:'glass',tint:[.99,.99,1],ior:1.376,dispersion:.004,thickness:.4,writeDepth:false},{castShadow:false});
 
 /* ---------- lids and lashes ---------- */
-const lidY=x=>3.95+.016*x*x,lidZ=x=>1.4-.018*x*x;
-const lidPts=[];for(let x=-13;x<=13;x+=.5)lidPts.push([x,lidY(x)+.9,lidZ(x)-.2]);
-const skin={a:[.26,.13,.09],m:0,r:.5,mode:'skin'};
-add(tube(lidPts,()=>1.55,24),[0,0,0],skin);
-const lowPts=[];for(let x=-13;x<=13;x+=.5)lowPts.push([x,-4.9-.012*x*x,1.1-.016*x*x]);
-add(tube(lowPts,()=>1.25,24),[0,0,0],skin);
+/* eyelids: two skin sheets that hug the eyeball and leave an almond-shaped opening. Each sheet starts with a rounded, wet
+   margin rolling back onto the eye, then rises over the globe (upper lid crease, thicker skin away from the margin). Metric uvs. */
+const FX=9.6;                                                    /* eye corners */
+const lidU=x=>{const q=Math.max(0,1-(x/FX)**2);return 4.35*Math.pow(q,.55)+.25*x/FX;};   /* upper margin (slightly higher at the outer corner) */
+const lidL=x=>{const q=Math.max(0,1-(x/FX)**2);return -3.2*Math.pow(q,.7);};
+const eyeZ=(x,y)=>{const r2=x*x+y*y;return r2<63.5?SC[2]+Math.sqrt(64-r2):SC[2]+Math.sqrt(.5)-(Math.sqrt(r2)-Math.sqrt(63.5))*.45;};
+function lidSheet(edge,dir,crease){const NX=96,NT=40,vb=[],ib=[];
+ for(let j=0;j<=NT;j++){for(let i=0;i<=NX;i++){const x=(i/NX-.5)*32,y0=edge(x);let y,z;
+   if(j<6){const a=j/5*Math.PI/2;                                 /* margin roll: from the eye surface out to the lid front */
+    y=y0-dir*.32*Math.sin(a*2)*.6;z=eyeZ(x,y0)+.08+1.05*(1-Math.cos(a));}
+   else{const t=(j-5)/(NT-5),far=dir>0?13:-13;y=y0+(far-y0)*Math.pow(t,1.35);
+    const T=1.13+.75*t-crease*Math.exp(-Math.pow((t-.3)/.06,2))+.18*Math.exp(-Math.pow((t-.42)/.12,2));
+    z=eyeZ(x,y)+T+.04*Math.sin(x*.9+t*7);}
+   vb.push(x,y,z,0,0,0,x/6,(y-y0)*dir/6+j*.005);}}
+ for(let j=0;j<NT;j++)for(let i=0;i<NX;i++){const a=j*(NX+1)+i,b=a+NX+1;if(dir>0)ib.push(a,a+1,b,a+1,b+1,b);else ib.push(a,b,a+1,a+1,b,b+1);}
+ return weldNormals({vb:new Float32Array(vb),ib:new Uint32Array(ib)});}
+const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.72,mode:'skin',noProject:true};
+add(lidSheet(lidU,1,.32),[0,0,0],skin);
+add(lidSheet(lidL,-1,.12),[0,0,0],skin);
+const lidY=x=>lidU(x)+.1,lidZ=x=>eyeZ(x,lidU(x))+.25;            /* lash roots sit on the upper margin */
 /* ~170 lashes rooted along the upper lid margin: they leave forward and down, then curl up; thin, tapering, glossy */
 const lashes=[];
-for(let k=0;k<170;k++){const x=-9.5+19*(k+rnd()*.8)/170,b=[x+(rnd()-.5)*.2,lidY(x)-.35+(rnd()-.5)*.25,lidZ(x)+1.05+rnd()*.3];
+for(let k=0;k<170;k++){const x=-8.6+17.2*(k+rnd()*.8)/170,b=[x+(rnd()-.5)*.2,lidY(x)+(rnd()-.5)*.2,lidZ(x)+.7+rnd()*.3];
  const L=2.1+1.4*rnd()*(1-Math.abs(x)/14),side=x*.02+(rnd()-.5)*.35,curl=.9+.7*rnd();
  const d0=v3.norm([side,-.75,.62]);const pts=[];let p=b.slice(),d=d0.slice();
  for(let i=0;i<12;i++){pts.push(p.slice());d=v3.norm(v3.add(d,[0,curl*.035,.02]));p=v3.add(p,v3.mul(d,L/11));}
@@ -12823,12 +12893,12 @@ let proj=null,projOn=Q.get('proj')!=='0';
    self-shadowing against the sun key, cavity AO and roughness estimated from the photo */
 if(typeof Image!=='undefined'){const img=new Image(),hm=new Image();   /* albedo plate (prep: haze and fall-off taken out), height plate */let n=0;const go=()=>{if(++n<2)return;
  proj=eng.addProjector({image:img,height:hm,pos:HERO.pos,target:HERO.target,fov:HERO.fov,aspect:IRIS_H.w/IRIS_H.h,mode:Q.get('pm')||'albedo',
-  delight:Q.has('dl')?+Q.get('dl'):0,highlights:1,relief:Q.has('relief')?+Q.get('relief'):.16,reliefShadow:1,ao:.65,roughness:'auto',detail:.4,
+  delight:Q.has('dl')?+Q.get('dl'):0,highlights:1,relief:Q.has('relief')?+Q.get('relief'):.1,reliefShadow:.75,ao:.5,roughness:'auto',detail:.4,
   angle:Q.has('ang')?+Q.get('ang'):86,edge:.02,occlusion:Q.get('occ')!=='0',bias:.06,static:true,on:projOn,naive:Q.get('naive')==='1'});};
  img.onload=go;hm.onload=go;img.src=IRIS_ALBEDO;hm.src=IRIS_HEIGHT;}
 
 /* ---------- camera ---------- */
-eng.setPost({tone:'agx',look:[1.18,1.2],saturation:1.12,curve:.3,bloom:.06,threshold:1.4,knee:.5,grain:.03,chromatic:.01,vignette:.85,flare:0,dirt:0,
+eng.setPost({tone:'agx',look:[1.18,1.2],saturation:1.12,curve:.3,bloom:.06,threshold:1.4,knee:.5,grain:.02,chromatic:.003,vignette:.85,flare:0,dirt:0,
  dofMaxCoC:Q.get('dof')==='0'?0:6,exposure:Q.has('ex')?+Q.get('ex'):.5});
 cam.fstop=5.6;cam.bokehScale=Q.get('dof')==='0'?0:1.6;cam.shutterAngle=180;
 function makeOrbit(canvas,o){
@@ -12875,7 +12945,9 @@ const orbit=makeOrbit($('c'),{minZoom:.25,maxZoom:2.2,floorY:-40,onMode:m=>{$('b
  /* [t, yaw, pitch, zoom, pan] around the photo's own camera */
  film:{dur:56,keys:[[0,0,0,1],[7,0,0,.97],[15,.05,.02,.5,[.68,-.34,0]],[23,.62,-.12,.62,[.4,-.2,0]],[31,.5,.42,.78,[.3,.6,0]],[39,-.55,.25,.55,[-.5,.4,0]],[47,-.25,-.1,.85,[0,0,0]]]}});
 let T=0;
-function frameCam(dt){T+=dt;const b=1+.004*Math.sin(T*.7);
+let giSlow=false;
+function frameCam(dt){T+=dt;if(gi&&!giSlow&&T>5){giSlow=true;eng.setGI({rate:6});}   /* static set: once converged, re-voxelize every 6th frame */
+const b=1+.004*Math.sin(T*.7);
  cam.pos=[HERO.pos[0],HERO.pos[1],HERO.pos[2]*b];cam.target=HERO.target.slice();
  const wide=window.innerWidth/Math.max(window.innerHeight,1);cam.fov=wide>=1.4?HERO.fov:HERO.fov*1.5;
  cam.focusTarget=[0,0,.35];}
