@@ -12873,34 +12873,63 @@ const eyeZ0=(x,y)=>{const r2=x*x+y*y;return r2<63.5?SC[2]+Math.sqrt(64-r2):SC[2]
 const eyeZ=(x,y)=>{const r2=x*x+y*y,a=eyeZ0(x,y);if(r2>=4.6*4.6)return a;const c=CC+Math.sqrt(CR*CR-r2)+.12,k=.35;const h=Math.max(k-Math.abs(a-c),0)/k;return Math.max(a,c)+h*h*k*.25;};
 function lidSheet(edge,dir,crease,fold){fold=fold||.18;const NX=96,NT=40,vb=[],ib=[];
  for(let j=0;j<=NT;j++){for(let i=0;i<=NX;i++){const x=(i/NX-.5)*32,y0=edge(x);let y,z;
-   if(j<6){const a=j/5*Math.PI/2;                                 /* margin roll: from the eye surface out to the lid front */
-    y=y0-dir*.32*Math.sin(a*2)*.6;z=eyeZ(x,y0)+.08+1.05*(1-Math.cos(a));}
+   if(j<6){const a=j/5*Math.PI/2,e=Math.sin(a);                   /* margin roll: from the eye surface out to the lid front, meeting it tangentially */
+    y=y0-dir*.14*Math.sin(a*2)+dir*.12*e*e;z=eyeZ(x,y0)+.08+1.05*(1-Math.cos(a));}
    else{const t=(j-5)/(NT-5),far=dir>0?13:-13;y=y0+(far-y0)*Math.pow(t,1.35);
     const T=1.13+.75*t-crease*Math.exp(-Math.pow((t-.3)/.06,2))+fold*Math.exp(-Math.pow((t-.4)/.1,2));
-    z=eyeZ(x,y)+T+.04*Math.sin(x*.9+t*7);}
-   vb.push(x,y,z,0,0,0,x/9,(y-y0)*dir/3.375+j*.004);}}
+    z=eyeZ(x,y)+T;}
+   vb.push(x,y,z,0,0,0,(x+16)/32,j/NT);}}
  for(let j=0;j<NT;j++)for(let i=0;i<NX;i++){const a=j*(NX+1)+i,b=a+NX+1;if(dir>0)ib.push(a,a+1,b,a+1,b+1,b);else ib.push(a,b,a+1,a+1,b,b+1);}
  return weldNormals({vb:new Float32Array(vb),ib:new Uint32Array(ib)});}
 /* subsurface: modelA scales the curvature into the pre-integrated skin LUT (this world is ~650x real size, so real-lid curvature needs a big gain);
    transmission lets the key glow red through the thin lid margin when it is back-lit */
-const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.56,mode:Q.get('sm')||'skin',modelA:45,modelB:Q.has('sss')?+Q.get('sss'):1,transmission:Q.has('trn')?+Q.get('trn'):.55,thickness:1.4,attenuation:[1,.32,.18],noProject:true};
+const skin={a:[.62,.5,.45],maps:SKIN,uvScale:1,m:0,r:.5,mode:Q.get('sm')||'skin',modelA:45,modelB:Q.has('sss')?+Q.get('sss'):.45,transmission:Q.has('trn')?+Q.get('trn'):.55,thickness:1.4,attenuation:[1,.32,.18],noProject:true};
 const lidUp=add(lidSheet(lidU,1,.5,.42),[0,0,0],skin),lidLo=add(lidSheet(lidL,-1,.12),[0,0,0],skin);
 /* lid skin from the closed-eye photo: delit tileable plate -> albedo; height = luminance band-pass -> normal; roughness from glint level */
+/* ---- lid skin texture, baked once for the whole lid (1536 x 768: u across 32 m, v margin -> far edge) ----
+   Real lid skin is not one tone: redder and thinner at the margin, pinker at the inner corner, a darker crease, blotchy capillary
+   colour, faint blue-violet veins showing through, and a fine criss-cross of micro-wrinkles that breaks up the oily sheen.
+   Fine grain comes from the photo plate (tiled at its real scale), regional colour and wrinkles are generated here. */
 if(typeof document!=='undefined'&&document.createElement){const im=new Image();im.onload=()=>{try{
- const W=im.naturalWidth,H=im.naturalHeight,cv=document.createElement('canvas');cv.width=W;cv.height=H;const cx=cv.getContext('2d');cx.drawImage(im,0,0);
- const px=cx.getImageData(0,0,W,H).data,N=W*H,L=new Float32Array(N),b1=new Float32Array(N),b2=new Float32Array(N);
- for(let i=0;i<N;i++)L[i]=(.2126*px[i*4]+.7152*px[i*4+1]+.0722*px[i*4+2])/255;
- const blur=(src,dst,r)=>{const t=new Float32Array(N);for(let y=0;y<H;y++){let a=0;for(let x=-r;x<=r;x++)a+=src[y*W+((x+W)%W)];for(let x=0;x<W;x++){t[y*W+x]=a/(2*r+1);a+=src[y*W+(x+r+1)%W]-src[y*W+(x-r+W)%W];}}
-  for(let x=0;x<W;x++){let a=0;for(let y=-r;y<=r;y++)a+=t[((y+H)%H)*W+x];for(let y=0;y<H;y++){dst[y*W+x]=a/(2*r+1);a+=t[((y+r+1)%H)*W+x]-t[((y-r+H)%H)*W+x];}}};
- blur(L,b1,1);blur(L,b2,6);
- const albedo=new Uint8Array(N*4),orm=new Uint8Array(N*4),normal=new Uint8Array(N*4),h=new Float32Array(N);
- for(let i=0;i<N;i++)h[i]=Math.max(0,Math.min(1,.5+(b1[i]-b2[i])*9));
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,o=i*4,hx=h[y*W+(x+1)%W]-h[y*W+(x+W-1)%W],hy=h[((y+1)%H)*W+x]-h[((y+H-1)%H)*W+x];
-  let nx=-hx*2.2,ny=-hy*2.2;const l=Math.hypot(nx,ny,1);
-  albedo[o]=px[o];albedo[o+1]=px[o+1];albedo[o+2]=px[o+2];albedo[o+3]=255;
-  orm[o]=Math.round(255*Math.min(1,.6+h[i]*.5));orm[o+1]=Math.round(255*Math.min(1,.78+.3*(1-h[i])));orm[o+2]=0;orm[o+3]=Math.round(255*h[i]);
+ const PW=im.naturalWidth,PH=im.naturalHeight,cv=document.createElement('canvas');cv.width=PW;cv.height=PH;const cx=cv.getContext('2d');cx.drawImage(im,0,0);
+ const pp=cx.getImageData(0,0,PW,PH).data,PL=new Float32Array(PW*PH);
+ for(let i=0;i<PW*PH;i++)PL[i]=(.2126*pp[i*4]+.7152*pp[i*4+1]+.0722*pp[i*4+2])/255;
+ const pm=PL.reduce((a,b)=>a+b,0)/PL.length;
+ const W=1536,H=768,N=W*H,albedo=new Uint8Array(N*4),orm=new Uint8Array(N*4),normal=new Uint8Array(N*4),h=new Float32Array(N),RO=new Float32Array(N);
+ const TW=10,TH=TW*PH/PW,LV=10;                          /* plate tile: 10 m wide (a real lid is ~1.5 plates wide); lid v spans ~10 m */
+ const tap=(x,y)=>{x=((x%PW)+PW)%PW;y=((y%PH)+PH)%PH;return ((Math.floor(y)*PW+Math.floor(x)));};
+ for(let y=0;y<H;y++){const v=y/(H-1),my=v*LV;for(let x=0;x<W;x++){const u=x/(W-1),mx=u*32-16,i=y*W+x;
+  const k=tap(mx/TW*PW,my/TH*PH),pl=PL[k]/pm;                               /* photo grain, ~1 */
+  /* micro-wrinkles: two families of fine wavy lines (along the lid, and diagonal), broken up by noise; plus tiny pores */
+  const w1=fbmT(mx*.6,my*.6,19,2),w2=fbmT(mx*.9+7,my*.9,29,2);
+  const brk=(a,b,P)=>{const n=fbmT(a,b,P,3);return Math.min(1,Math.max(0,n-.42)*3.5);};   /* breaks lines into short irregular segments */
+  const l1=Math.pow(Math.abs(Math.sin((my*10.5+mx*.5+w1*3.4)*Math.PI)),34)*brk(mx*2.2,my*2.2,70);
+  const l2=Math.pow(Math.abs(Math.sin((mx*7.3-my*8.1+w2*3.8)*Math.PI)),40)*brk(mx*1.9+3,my*1.9,61)*.7;
+  const pore=Math.pow(Math.max(0,fbmT(mx*12,my*12,384,2)-.6)*3,2);
+  const wr=Math.min(1,l1+l2);
+  /* micro-relief: dense fine grain + a criss-cross of very fine furrows (the skin's surface pattern) - this is what breaks the sheen into glints */
+  const gr=fbmT(mx*26,my*26,832,2)-.5,f1=Math.pow(Math.abs(Math.sin((mx*13+my*21+w2*2)*Math.PI)),6),f2=Math.pow(Math.abs(Math.sin((mx*15-my*19+w1*2)*Math.PI)),6);
+  const micro=.16*gr-.07*(f1+f2)*fbmT(mx*4,my*4,128,2);
+  h[i]=Math.max(0,Math.min(1,.55+(pl-1)*.9-.16*wr-.2*pore+micro+.05*(fbmT(mx*2.5,my*2.5,80,3)-.5)));
+  /* colour */
+  let r=pp[k*4]/255,g=pp[k*4+1]/255,b=pp[k*4+2]/255;r=r*r*.9+r*.1;g=g*g*.9+g*.1;b=b*b*.9+b*.1;   /* ~linear */
+  const blot=fbmT(mx*.25+11,my*.25,8,4)-.5,blot2=fbmT(mx*.9,my*.9+5,29,3)-.5;
+  const marg=Math.exp(-v/.05),inner=1/(1+Math.exp((mx+6.5)*1.2))*Math.exp(-v/.35);
+  const crease=Math.exp(-Math.pow((v-.31)/.07,2));
+  const vein=.7*Math.pow(Math.max(0,1-Math.abs(fbmT(mx*.18+2,my*.18,6,4)-.5)*9),4)*Math.max(0,Math.min(1,(v-.08)*6))*(1-crease*.5);
+  let R_=r*(1+.2*blot+.08*blot2+.2*marg+.25*inner),G_=g*(1-.1*blot+.03*blot2-.16*marg-.12*inner),B_=b*(1-.06*blot-.1*marg-.06*inner);
+  R_*=1-.2*crease;G_*=1-.26*crease;B_*=1-.16*crease;                         /* crease: a little darker, cooler */
+  R_*=1-.2*vein;G_*=1-.14*vein;B_*=1+.08*vein;                              /* veins: blue-violet through thin skin */
+  const sh=1-.07*wr-.1*pore;                                               /* cavities read darker in colour too */
+  const enc=c=>Math.round(255*Math.pow(Math.max(0,Math.min(1,c*sh)),1/2.2));
+  albedo[i*4]=enc(R_);albedo[i*4+1]=enc(G_);albedo[i*4+2]=enc(B_);albedo[i*4+3]=255;
+  /* roughness multiplier: oily, slightly glossy peaks; matte cavities, crease and pores */
+  RO[i]=Math.max(.38,Math.min(1,.8+.25*wr+.3*pore+.18*crease-.35*Math.max(0,gr*2.4)-.18*Math.max(0,(pl-1)*3)+.1*(fbmT(mx*1.6,my*1.6,51,2)-.5)-.12*marg));}}
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,o=i*4,hx=h[y*W+Math.min(x+1,W-1)]-h[y*W+Math.max(x-1,0)],hy=h[Math.min(y+1,H-1)*W+x]-h[Math.max(y-1,0)*W+x];
+  let nx=-hx*2.6,ny=-hy*2.6;const l=Math.hypot(nx,ny,1);
+  orm[o]=Math.round(255*Math.min(1,.55+h[i]*.55));orm[o+1]=Math.round(255*RO[i]);orm[o+2]=0;orm[o+3]=Math.round(255*h[i]);
   normal[o]=Math.round((nx/l*.5+.5)*255);normal[o+1]=Math.round((ny/l*.5+.5)*255);normal[o+2]=255;normal[o+3]=255;}
- skin.maps=eng.createMaps({w:W,h:H,albedo,orm,normal});skin.a=[.93,.9,.9];}catch(e){console.warn('lid plate: '+e.message);}};im.src=LID_SKIN;}
+ skin.maps=eng.createMaps({w:W,h:H,albedo,orm,normal});skin.a=[1,.97,.96];}catch(e){console.warn('lid texture: '+e.message);}};im.src=LID_SKIN;}
 let curUp=lidU;                                                  /* the current upper margin (animated) */
 const lidY=x=>curUp(x)+.1,lidZ=x=>eyeZ(x,curUp(x))+.25;            /* lash roots sit on the upper margin */
 /* ~170 lashes rooted along the upper lid margin: they leave forward and down, then curl up; thin, tapering, glossy */
