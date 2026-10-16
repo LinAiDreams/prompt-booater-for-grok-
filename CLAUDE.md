@@ -38,6 +38,8 @@ Verification-first and deliberate. Before any final answer or critical tool chai
 - **Photo-derived textures.** Verify the albedo on its own before judging the shaded result.
 - **Voxel GI.** It carries light from emitters and dark props out of frame. A colour cast on skin usually means an out-of-frame emitter. Confirm by switching the emitter off.
 - **Iris scene (`scenes/iris.html`).** It needs four engine patches that are not in the upstream engine: `updateMesh(mesh, vb)`; `createEngine({minScale})`; `mat.noProject` (flag 65536); and the skin LUT texel-centre clamp. Re-apply them after any engine update. The patched engine copies live outside this repo.
+- **Underwater (`scenes/treasure-chest.html`).** `setTerrain` water absorbs only for a camera above the surface, so a camera below it sees an above-water look. The scene uses a water-medium patch instead: Beer-Lambert absorption in `fogT`, sun and ambient tinted by the water column, and a replaced water sky. Fog tint cannot express per-channel absorption.
+- **God rays.** The ray pass (`S.raysFS`) adds only HDR pixels above luminance 60 (smoothstep 60→200). Without a sun glow that bright near the sun there are no shafts. A glow too broad hazes the whole frame, so keep the lobe narrow (`pow(dot,24)`, peak ≈ 95).
 - **Scripted edits.** Assert the match count before replacing text. A silently missed replacement cost time earlier.
 - **Eye proportions** (measured from the reference photos): opening width ≈ 2.2 × iris width; opening height ≈ 0.41 × its width; brow centre ≈ 0.5 eye-width above the pupil.
 
