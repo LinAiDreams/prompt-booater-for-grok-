@@ -4632,7 +4632,7 @@ void main(){
   mineral=step(.90,gh)*.55;
   mica=step(.992,hash12(floor(p*260.)+7.));
   rip=ripH(p);}
- vec3 sandDry=mix(vec3(.66,.58,.44),vec3(.50,.42,.30),n2)*(.86+.22*grain)*(.9+.2*vn(p*2.7));
+ vec3 sandDry=mix(vec3(.84,.66,.44),vec3(.62,.46,.28),n2)*(.86+.22*grain)*(.9+.2*vn(p*2.7));
  sandDry*=(1.-mineral*.5)*(.94+.1*rip);
  vec3 sandWet=sandDry*vec3(.42,.40,.37);
  float leaf=0.;vec3 jungle=vec3(.03,.08,.014);
@@ -17404,7 +17404,7 @@ const grid=buildGrid((x,z)=>BASE+.22*(fbm2(x*.09+4,z*.09+1,3)-.5)+.05*(vn2(x*.7,
 eng.setTerrain(grid,{mode:'island',skirt:false,water:false});
 eng.setFog({density:0,falloff:.04,horizon:[1e6,2e6],rayleigh:0,mie:0,g:.76});
 eng.setClouds({coverage:0});
-eng.setWaterMedium({absorb:[.22,.05,.025],scatter:[.05,.3,.36],depth:2});
+eng.setWaterMedium({absorb:[.22,.05,.025],scatter:[.05,.3,.36],depth:1.1});
 
 /* ---------- camera: a low three-quarter view at the chest, slightly above it ---------- */
 const CAM={pos:[-.55,BASE+1.25,3.4],tgt:[.1,BASE+.45,0],fov:44*DEG};
@@ -17436,17 +17436,17 @@ eng.addObject({m:eng.addMesh(mergeG(iron)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.16
 const coinParts=[];
 for(let k=0;k<520;k++){
  const x=(rnd()*2-1)*.52,z=(rnd()*2-1)*.33,e=(x/.54)**2+(z/.36)**2;if(e>1)continue;
- const y=.07+(.62*Math.sqrt(1-e)+.1)*Math.pow(rnd(),.7);     /* heap on the floor, rising toward the rim and past it */
+ const y=.07+(.62*Math.sqrt(1-e)+.1)*Math.pow(rnd(),.45);     /* heap on the floor, rising toward the rim and past it */
  const a=rnd()*TAU,tl=(rnd()*.4+.05)*(rnd()<.5?1:.3);
  const n=v3.norm([Math.sin(a)*tl,1,Math.cos(a)*tl]);
  const c=rotY([x,y,z],CH.yaw);coinParts.push(coin(v3.add(c,[0,BASE,0]),n,.072+.012*rnd(),12));}
 for(let k=0;k<34;k++){const x=-.9+rnd()*1.5,z=1.0+rnd()*.7;const d=Math.hypot(x-.1,z);if(d<.7)continue;
  coinParts.push(coin([x,BASE+.012,z],v3.norm([(rnd()-.5)*.3,1,(rnd()-.5)*.3]),.072,12));}
-const gold=eng.addObject({m:eng.addMesh(mergeG(coinParts)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[1,.6,.16],m:1,r:.3,clearcoat:.4,clearcoatRough:.08}});
+const gold=eng.addObject({m:eng.addMesh(mergeG(coinParts)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[1,.7,.24],m:0,r:.4,clearcoat:.15,clearcoatRough:.1}});
 
 /* ---------- rock at the left (algae-dark crevices), wreck far back, coral at the right ---------- */
 const rockG=genRock(5);
-eng.addObject({m:eng.addMesh(place(rockG,{s:1.05,mid:[0,0,0],yaw:.7,at:[-1.9,BASE+.2,.7]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.44,.32,.2],m:0,r:.85,mode:2}});
+eng.addObject({m:eng.addMesh(place(rockG,{s:1.05,mid:[0,0,0],yaw:.7,at:[-1.9,BASE+.2,.7]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.1,.075,.05],m:0,r:.9}});
 
 const wreckHull=place(genRoundedBox(15,3,4.6,.25,3),{mid:[0,1.2,0],rx:0,yaw:.42,at:[4,BASE,-17]});
 const wreckRibs=[];for(let k=0;k<6;k++){const t=k/5;wreckRibs.push(place(genBox(.28,2.8,4.6),{mid:[-6.5+13*t,1.2,0],yaw:.42,at:[4,BASE,-17]}));}
@@ -17475,7 +17475,7 @@ const weed=[];
 for(let k=0;k<22;k++){const a=rnd()*TAU,rr=.9+rnd()*1.9,x=Math.cos(a)*rr-.2,z=Math.sin(a)*rr*.8+.2;
  if(Math.hypot(x,z)<.9)continue;
  weed.push(x,gridH(grid,x,z)-.02,z,.9+rnd()*.6,rnd()*TAU,.05+rnd()*.2,rnd()*TAU,rnd());}
-eng.addFoliage({geom:genGrassClump(12,7,4),instances:new Float32Array(weed),farFrac:.3,mat:{stem:[.1,.1,.04],leaf:[.1,.13,.04],leaf2:[.17,.18,.06],leafRough:.5,trans:.9,normal:.6}});
+eng.addFoliage({geom:genGrassClump(12,7,4),instances:new Float32Array(weed),farFrac:.3,mat:{stem:[.1,.1,.04],leaf:[.12,.1,.04],leaf2:[.2,.17,.07],leafRough:.5,trans:.4,normal:.6}});
 
 /* ---------- caustics: a procedural caustic net projected from above (the sun's light through the surface) ---------- */
 function causticImage(N,cells,seedC){const d=new Uint8Array(N*N*4);
@@ -17489,7 +17489,7 @@ function causticImage(N,cells,seedC){const d=new Uint8Array(N*N*4);
  return {data:d,w:N,h:N};}
 if(Q.get('cau')!=='0'){
  eng.addProjector({image:causticImage(512,30,3),pos:[0,BASE+15,0],target:[0,BASE,0],fov:58*DEG,mode:'light',
-  intensity:Q.has('cint')?+Q.get('cint'):280,occlusion:true,bias:.05,static:true,near:.5,far:60});}
+  intensity:Q.has('cint')?+Q.get('cint'):220,occlusion:true,bias:.05,static:true,near:.5,far:60});}
 
 /* ---------- suspended particles in the light ---------- */
 eng.addEmitter({kind:'pollen',pos:[0,BASE+2.4,0],count:240,vel:[.02,.02,0],life:9,spread:[4.5,2.2,3.5],size:.045,gravity:-.01,turbulence:.6,color:[.75,.92,.95],alpha:.45,soft:.6});
