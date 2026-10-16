@@ -17442,11 +17442,11 @@ for(let k=0;k<520;k++){
  const c=rotY([x,y,z],CH.yaw);coinParts.push(coin(v3.add(c,[0,BASE,0]),n,.072+.012*rnd(),12));}
 for(let k=0;k<34;k++){const x=-.9+rnd()*1.5,z=1.0+rnd()*.7;const d=Math.hypot(x-.1,z);if(d<.7)continue;
  coinParts.push(coin([x,BASE+.012,z],v3.norm([(rnd()-.5)*.3,1,(rnd()-.5)*.3]),.072,12));}
-const gold=eng.addObject({m:eng.addMesh(mergeG(coinParts)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[1,.7,.24],m:0,r:.4,clearcoat:.15,clearcoatRough:.1}});
+const gold=eng.addObject({m:eng.addMesh(mergeG(coinParts)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[1,.56,.12],m:0,r:.35,clearcoat:.2,clearcoatRough:.08}});
 
 /* ---------- rock at the left (algae-dark crevices), wreck far back, coral at the right ---------- */
 const rockG=genRock(5);
-eng.addObject({m:eng.addMesh(place(rockG,{s:1.05,mid:[0,0,0],yaw:.7,at:[-1.9,BASE+.2,.7]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.1,.075,.05],m:0,r:.9}});
+eng.addObject({m:eng.addMesh(place(rockG,{s:1.05,mid:[0,0,0],yaw:.7,at:[-1.9,BASE+.2,.7]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.14,.1,.06],m:0,r:.85}});
 
 const wreckHull=place(genRoundedBox(15,3,4.6,.25,3),{mid:[0,1.2,0],rx:0,yaw:.42,at:[4,BASE,-17]});
 const wreckRibs=[];for(let k=0;k<6;k++){const t=k/5;wreckRibs.push(place(genBox(.28,2.8,4.6),{mid:[-6.5+13*t,1.2,0],yaw:.42,at:[4,BASE,-17]}));}
@@ -17459,7 +17459,7 @@ for(let k=0;k<5;k++){const a=rnd()*TAU,rr=rnd()*.18,x=1.55+Math.cos(a)*rr,z=.7+M
  const prof=[[r*.7,0],[r,h*.25],[r*.9,h*.5],[r*1.2,h*.75],[r*.4,h]];coralA.push(place(lathe(prof,10),{at:[x,BASE,z],yaw:rnd()*TAU}));}
 for(let k=0;k<4;k++){const a=rnd()*TAU,rr=rnd()*.24,x=1.85+Math.cos(a)*rr,z=1.05+Math.sin(a)*rr,h=.28+rnd()*.3,r=.035+rnd()*.025;
  const prof=[[r*.8,0],[r,h*.35],[r*1.4,h*.7],[r*.5,h]];coralB.push(place(lathe(prof,10),{at:[x,BASE,z],yaw:rnd()*TAU}));}
-eng.addObject({m:eng.addMesh(mergeG(coralA)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.5,.2,.7],m:0,r:.35,clearcoat:.6,clearcoatRough:.1,transmission:.25,thickness:.3,attenuation:[.6,.9,.6]}});
+eng.addObject({m:eng.addMesh(mergeG(coralA)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.42,.1,.6],m:0,r:.35,clearcoat:.6,clearcoatRough:.1,transmission:.15,thickness:.3,attenuation:[.6,.9,.6]}});
 eng.addObject({m:eng.addMesh(mergeG(coralB)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.92,.4,.62],m:0,r:.4,clearcoat:.5,clearcoatRough:.12,transmission:.2,thickness:.2,attenuation:[.9,.7,.8]}});
 
 /* ---------- kelp: a dense field of ribbons behind the chest, reaching toward the surface ---------- */
@@ -17468,14 +17468,16 @@ for(let k=0;k<52;k++){
  const x=(rnd()*2-1)*17-1,z=-6.5-rnd()*12,H=4.8+rnd()*1.8,ph=rnd()*TAU,A=.45+rnd()*.8,W=.17+rnd()*.12,N=26;
  const pts=[];for(let i=0;i<=N;i++){const t=i/N;pts.push([x+A*Math.sin(t*2.4+ph)*t,BASE+H*t,z+.35*A*Math.cos(t*1.6+ph)*t]);}
  kelp.push(ribbon(pts,t=>W*(1-.75*t)*Math.sin(Math.PI*Math.min(.06+t,1)*.5+.5)));}
-eng.addObject({m:eng.addMesh(mergeG(kelp)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.07,.11,.05],m:0,r:.6,doubleSided:true,transmission:.2,thickness:.3,attenuation:[.4,1,.55]}});
+eng.addObject({m:eng.addMesh(mergeG(kelp)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.05,.09,.04],m:0,r:.6,doubleSided:true}});
 
-/* ---------- seaweed tufts around the chest base ---------- */
-const weed=[];
-for(let k=0;k<22;k++){const a=rnd()*TAU,rr=.9+rnd()*1.9,x=Math.cos(a)*rr-.2,z=Math.sin(a)*rr*.8+.2;
+/* ---------- seaweed fronds around the chest base: broad ribbons that sway, dark olive ---------- */
+const weedF=[];
+for(let k=0;k<12;k++){const a=rnd()*TAU,rr=.95+rnd()*1.8,x=Math.cos(a)*rr-.2,z=Math.sin(a)*rr*.8+.2;
  if(Math.hypot(x,z)<.9)continue;
- weed.push(x,gridH(grid,x,z)-.02,z,.9+rnd()*.6,rnd()*TAU,.05+rnd()*.2,rnd()*TAU,rnd());}
-eng.addFoliage({geom:genGrassClump(12,7,4),instances:new Float32Array(weed),farFrac:.3,mat:{stem:[.1,.1,.04],leaf:[.12,.1,.04],leaf2:[.2,.17,.07],leafRough:.5,trans:.4,normal:.6}});
+ const H=.32+rnd()*.3,ph=rnd()*TAU,A=.12+rnd()*.12,y0=gridH(grid,x,z)-.02,N=14,W=.05+rnd()*.04;
+ const pts=[];for(let i=0;i<=N;i++){const t=i/N;pts.push([x+A*Math.sin(t*2.2+ph)*t,y0+H*t,z+.5*A*Math.cos(t*1.7+ph)*t]);}
+ weedF.push(ribbon(pts,t=>W*(1-.8*t)*Math.sin(Math.PI*Math.min(.08+t,1)*.5+.5)));}
+eng.addObject({m:eng.addMesh(mergeG(weedF)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.12,.13,.05],m:0,r:.6,doubleSided:true,transmission:.25,thickness:.2,attenuation:[.5,.9,.4]}});
 
 /* ---------- caustics: a procedural caustic net projected from above (the sun's light through the surface) ---------- */
 function causticImage(N,cells,seedC){const d=new Uint8Array(N*N*4);
