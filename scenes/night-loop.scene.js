@@ -51,19 +51,20 @@ function sweep(nS,nW,fn){const vb=[],ib=[];
 const lerp3=(a,b,s)=>[a[0]+(b[0]-a[0])*s,a[1]+(b[1]-a[1])*s,a[2]+(b[2]-a[2])*s];
 
 /* ---------- environment: night, dark asphalt, one floodlight, a red rim light, post ---------- */
-eng.setFog({density:.004,falloff:.04,horizon:[1e6,2e6],rayleigh:0,mie:0,g:.76});
+eng.setFog({density:0,falloff:.04,horizon:[1e6,2e6],rayleigh:0,mie:0,g:.76});
 eng.setClouds({coverage:0});
 eng.setTimeOfDay(-30,200,0);
-eng.setPost({tone:'agx',exposure:1.5,look:[1,1],saturation:1.08,curve:.22,bloom:.2,threshold:.9,knee:.5,grain:.02,chromatic:.003,vignette:.45,dofMaxCoC:10});
+eng.setPost({tone:'agx',exposure:1.35,look:[1,1],saturation:.72,curve:.22,bloom:.12,threshold:.9,knee:.5,grain:.02,chromatic:.003,vignette:.45,dofMaxCoC:10});
 cam.fstop=2.8;cam.bokehScale=2;cam.shutterAngle=180;
 eng.addObject({m:eng.addMesh(place(genBox(900,.4,900),{mid:[0,-.2,0]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.022,.022,.026],m:0,r:.5,wet:.5}});
 eng.addObject({m:eng.addMesh(place(genBox(44,.02,.2),{mid:[26,.01,0]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.7,.7,.68],m:0,r:.6}});
-const flood=eng.addLight({type:'spot',pos:[-40,46,40],dir:[.6,-.6,-.5],color:[1,.96,.9],intensity:500,range:200,angle:.34,inner:.22});
+const flood=eng.addLight({type:'spot',pos:[-40,46,40],dir:[.6,-.6,-.5],color:[1,.96,.9],intensity:900,range:200,angle:.45,inner:.3});
 flood.dir=v3.norm(v3.sub([14,6,-2],flood.pos));
-const pool=eng.addLight({type:'spot',pos:[57,40,-5],dir:[0,-1,0],color:[1,.97,.92],intensity:250,range:90,angle:.22,inner:.15});
+const pool=eng.addLight({type:'spot',pos:[57,40,-5],dir:[0,-1,0],color:[1,.97,.92],intensity:60,range:90,angle:.22,inner:.15});
+const key=eng.addLight({type:'spot',pos:[0,9,0],dir:[0,-1,0],color:[1,.97,.92],intensity:200,range:40,angle:.35,inner:.25});
 
 /* ---------- the ramp: a circular arc of radius R, from horizontal on the ground up to 60 degrees; steel frame underneath ---------- */
-const R=24,PHI=Math.PI/3,W=4.4,HALF=W/2;
+const R=24,PHI=75*Math.PI/180,W=4.4,HALF=W/2;
 const curve=ph=>({p:[R*Math.sin(ph),R*(1-Math.cos(ph)),0],T:[Math.cos(ph),Math.sin(ph),0],N:[-Math.sin(ph),Math.cos(ph),0]});
 eng.addObject({m:eng.addMesh(sweep(56,4,(s,w)=>{const c=curve(s*PHI);return {p:[c.p[0],c.p[1],(w-.5)*W],n:c.N};})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.34,.34,.35],m:0,r:.6,wet:.4}});
 /* red LED edge strips along both kerbs */
@@ -92,9 +93,9 @@ addCar(carParts.glass,{a:[.02,.03,.04],m:0,r:.08,clearcoat:1,clearcoatRough:.02}
 addCar(carParts.rubber,{a:[.02,.02,.025],m:0,r:.7});
 addCar(carParts.light,{a:[0,0,0],m:0,r:1,emissive:[7,7,6]});
 addCar(carParts.red,{a:[0,0,0],m:0,r:1,emissive:[4,.15,.08]});
-const headL=eng.addLight({type:'spot',pos:[0,1,0],dir:[1,0,0],color:[1,.96,.88],intensity:300,range:80,angle:.5,inner:.35});
-const smoke=eng.addEmitter({kind:'smoke',pos:[0,-50,0],count:620,spread:[1.6,.5,2.4],vel:[0,.5,0],life:6,size:2.1,growth:2.2,turbulence:.4,alpha:.5,color:[.8,.8,.82],on:false});
-const thruster=eng.addRibbon({points:[[0,-50,0],[0,-50,0]],width:.14,color:[.4,.9,1],intensity:2.6,taper:true});
+const headL=eng.addLight({type:'spot',pos:[0,1,0],dir:[1,0,0],color:[1,.96,.88],intensity:120,range:60,angle:.5,inner:.35});
+const smoke=eng.addEmitter({kind:'smoke',pos:[0,-50,0],count:600,spread:[2.2,.25,2.6],vel:[0,.15,0],life:5,size:1.5,growth:1.1,turbulence:.5,alpha:.8,color:[1.8,1.8,1.9],on:false});
+const thruster=eng.addRibbon({points:[[0,-50,0],[0,-50,0]],width:.05,color:[.4,.9,1],intensity:.5,taper:true});
 
 /* ---------- the motion: drive up the ramp (2.0-4.3 s), flight with one flip (to landing), a circular drift, then a stop ---------- */
 const tD0=2.0,tD1=4.3,VL=R*1.5*PHI/(tD1-tD0);             /* launch speed from the ramp's end slope */
@@ -102,7 +103,7 @@ const L0=curve(PHI),VX=VL*L0.T[0],VY=VL*L0.T[1],Y0=L0.p[1];
 const TF=(VY+Math.sqrt(VY*VY+2*G*Y0))/G,TLAND=tD1+TF,XL=L0.p[0]+VX*TF;   /* flight time to the ground */
 const TSTOP=16.5,RC=9,WD=.85,DRIFT=.28;
 const pose=(pos,F,U,flying,drifting)=>({pos,F,U,flying,drifting});
-function flight(tau){const a=5*Math.PI/3*tau/TF,ca=Math.cos(a),sa=Math.sin(a);
+function flight(tau){const a=(2*Math.PI-PHI)*tau/TF,ca=Math.cos(a),sa=Math.sin(a);
  return pose([L0.p[0]+VX*tau,Y0+VY*tau-G/2*tau*tau,0],
   [ca*L0.T[0]+sa*L0.N[0],ca*L0.T[1]+sa*L0.N[1],0],[-sa*L0.T[0]+ca*L0.N[0],-sa*L0.T[1]+ca*L0.N[1],0],true,false);}
 function carPose(T){
@@ -121,11 +122,11 @@ function setCar(c){const R3=v3.cross(c.F,c.U);
 /* ---------- camera shots: each returns the base pose for film time T; the viewer's orbit is layered on top ---------- */
 function shot(T){
  if(T<2.2){const s=T/2.2;return {pos:lerp3([-38,3,30],[-34,2.6,26],s),tgt:[8,8,0],fov:38,focus:[4,6,0]};}
- if(T<8.5){const c=carPose(T).pos;return {pos:v3.add(c,[-6,2.6,14]),tgt:v3.add(c,[2,2,0]),fov:42,focus:c};}
- if(T<14){const c=carPose(T).pos;return {pos:[36,2.4,14],tgt:v3.add(c,[0,1,0]),fov:44,focus:c};}
+ if(T<8.5){const c=carPose(T).pos;return {pos:[-6,12,34],tgt:[12,9,0],fov:52,focus:c};}
+ if(T<14){const cp=carPose(T),c=cp.pos,Rt=v3.cross(cp.F,cp.U);return {pos:v3.add(v3.add(c,v3.mul(Rt,12)),[0,1.2,0]),tgt:v3.add(c,[0,.9,0]),fov:44,focus:c};}
  if(T<22){const s=(T-14)/8;return {pos:lerp3([30,46,40],[26,58,30],s),tgt:[30,0,-2],fov:50,focus:[30,0,-2]};}
  if(T<29){const s=(T-22)/7;return {pos:lerp3([-10,1.2,22],[-8,1.6,20],s),tgt:[10,9,0],fov:46,focus:[10,9,0]};}
- if(T<37){const a=(T-29)*.5,m=[32,2,-5];return {pos:[m[0]+36*Math.cos(a),32,m[2]+36*Math.sin(a)],tgt:m,fov:46,focus:m};}
+ if(T<37){const a=(T-29)*.5-3.57,m=[32,2,-5];return {pos:[m[0]+36*Math.cos(a),32,m[2]+36*Math.sin(a)],tgt:m,fov:46,focus:m};}
  const s=Math.min((T-37)/9,1);return {pos:lerp3([44,12,46],[70,22,80],s),tgt:[22,8,0],fov:46,focus:[22,8,0]};}
 
 /* ---------- HUD and the viewer's orbit (drag, pinch, wheel; double-tap or Film returns) ---------- */
@@ -172,10 +173,11 @@ eng.start(dt=>{
  if(!paused)T+=dt;
  const t=T%DUR,c=carPose(t);setCar(c);
  const hf=v3.norm(v3.add(c.F,[0,-.08,0]));
- headL.pos=v3.add(c.pos,v3.add(v3.mul(c.F,2.3),[0,.75,0]));headL.dir=hf;
+ headL.pos=v3.add(c.pos,v3.add(v3.mul(c.F,2.3),[0,.75,0]));headL.dir=hf;headL.on=!c.flying;
  smoke.on=c.drifting;
+ key.pos=v3.add(c.pos,[0,9,0]);key.on=!c.flying;
  if(c.drifting)smoke.pos=v3.add(c.pos,v3.add(v3.mul(c.F,-1.3),[0,.2,0]));
- const pts=[];for(let j=0;j<12;j++){const tau=Math.max(0,t-tD1-j*.06);
+ const pts=[];for(let j=0;j<10;j++){const tau=Math.max(0,t-tD1-j*.025);
   if(t>=tD1&&t<TLAND){const fp=flight(Math.min(tau,TF));pts.push(v3.add(fp.pos,v3.add(v3.mul(fp.F,-2.1),[0,.45,0])));}}
  thruster.update(pts.length>1?pts:[[0,-50,0],[0,-50,0]]);
  const sh=shot(t);
