@@ -154,10 +154,59 @@ eng.setPost({tone:'agx',exposure:1.25,look:[1.1,1.16],saturation:1.12,curve:.22,
 cam.fstop=2.2;cam.bokehScale=Q.get('dof')==='0'?0:2;cam.shutterAngle=180;
 cam.focusTarget=[0,BASE+.4,0];
 
-/* ---------- life: a slow breathing drift of the camera ---------- */
-let T=0;
-eng.start(dt=>{T+=dt;const k=Math.sin(T*.13),k2=Math.sin(T*.09+1);
- cam.pos=[CAM.pos[0]+.05*k,CAM.pos[1]+.02*k2,CAM.pos[2]];cam.target=CAM.tgt.slice();});
-if(Q.has('q')){eng.setQuality(+Q.get('q'));}
+/* ---------- camera: a slow film drift around the chest, or the viewer's own orbit (drag, pinch or wheel; double-tap or Film returns) ---------- */
+let T=0,drift=true;
+/* free camera: orbit / zoom / pan on top of the base pose (same controls as the other scenes) */
+function makeOrbit(canvas,o){
+ const st={yaw:0,pitch:0,zoom:1,pan:[0,0,0],cur:{yaw:0,pitch:0,zoom:1,pan:[0,0,0]},mode:'film',ft:0,touched:false};
+ const ptr=new Map();let pinch0=0,zoom0=1,mid0=null,lastTap=0;
+ const minZ=o.minZoom||.35,maxZ=o.maxZoom||3,floorY=o.floorY===undefined?.02:o.floorY,F=o.film;
+ const setMode=m=>{st.mode=m;st.touched=m==='free';if(o.onMode)o.onMode(m);};
+ const film=()=>{if(st.mode!=='film'){st.ft=0;setMode('film');}};
+ const touch=()=>{if(st.mode!=='free')setMode('free');};
+ let basis=null;
+ function panBy(dx,dy,dist){if(!basis)return;const k=dist*.0016;for(let i=0;i<3;i++)st.pan[i]+=(-basis.r[i]*dx+basis.u[i]*dy)*k;}
+ canvas.addEventListener('contextmenu',e=>e.preventDefault());
+ canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);ptr.set(e.pointerId,{x:e.clientX,y:e.clientY,b:e.button,sh:e.shiftKey});
+  if(ptr.size===2){const [a,b]=[...ptr.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);zoom0=st.zoom;mid0=[(a.x+b.x)/2,(a.y+b.y)/2];}
+  const now=performance.now();if(ptr.size===1&&now-lastTap<300)film();lastTap=now;});
+ canvas.addEventListener('pointermove',e=>{const p=ptr.get(e.pointerId);if(!p)return;const dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;
+  if(ptr.size===1){if(Math.abs(dx)+Math.abs(dy)<.5)return;touch();
+   if(p.b===2||p.sh)panBy(dx,dy,st.dist||1);else{st.yaw-=dx*.006;st.pitch=clamp(st.pitch+dy*.005,-1.2,1.2);}}
+  else if(ptr.size===2){touch();const [a,b]=[...ptr.values()],d=Math.max(Math.hypot(a.x-b.x,a.y-b.y),1),m=[(a.x+b.x)/2,(a.y+b.y)/2];
+   st.zoom=clamp(zoom0*pinch0/d,minZ,maxZ);panBy(m[0]-mid0[0],m[1]-mid0[1],st.dist||1);mid0=m;}});
+ const up=e=>ptr.delete(e.pointerId);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+ canvas.addEventListener('wheel',e=>{e.preventDefault();touch();st.zoom=clamp(st.zoom*(1+e.deltaY*.0012),minZ,maxZ);},{passive:false});
+ /* looping Catmull-Rom through the film keys, eased per segment: no cuts, no stops */
+ function filmAt(t){const K=F.keys,n=K.length,T=((t%F.dur)+F.dur)%F.dur;let i=0;while(i<n-1&&T>=K[i+1][0])i++;
+  const k1=K[i],k2=K[(i+1)%n],t2=i+1<n?k2[0]:F.dur,u0=(T-k1[0])/Math.max(t2-k1[0],1e-3),u=u0*u0*(3-2*u0);
+  const k0=K[(i-1+n)%n],k3=K[(i+2)%n],c=(a,b,cc,d)=>.5*(2*b+(-a+cc)*u+(2*a-5*b+4*cc-d)*u*u+(-a+3*b-3*cc+d)*u*u*u);
+  return {yaw:c(k0[1],k1[1],k2[1],k3[1]),pitch:c(k0[2],k1[2],k2[2],k3[2]),zoom:c(k0[3],k1[3],k2[3],k3[3]),
+   pan:[0,1,2].map(j=>c((k0[4]||[0,0,0])[j],(k1[4]||[0,0,0])[j],(k2[4]||[0,0,0])[j],(k3[4]||[0,0,0])[j]))};}
+ st.apply=(cam,dt)=>{
+  if(st.mode==='film'&&F){st.ft+=dt;const f=filmAt(st.ft);st.yaw=f.yaw;st.pitch=f.pitch;st.zoom=f.zoom;st.pan=f.pan;}
+  const c=st.cur,k=1-Math.exp(-dt*(st.mode==='film'?2.5:10));
+  c.yaw+=(st.yaw-c.yaw)*k;c.pitch+=(st.pitch-c.pitch)*k;c.zoom+=(st.zoom-c.zoom)*k;for(let i=0;i<3;i++)c.pan[i]+=(st.pan[i]-c.pan[i])*k;
+  const tg=v3.add(cam.target,c.pan),v=v3.sub(cam.pos,cam.target),r=v3.len(v)*c.zoom;
+  const az=Math.atan2(v[2],v[0])+c.yaw,el=clamp(Math.asin(clamp(v[1]/Math.max(v3.len(v),1e-6),-1,1))+c.pitch,-.2,1.45);
+  let p=[tg[0]+r*Math.cos(el)*Math.cos(az),tg[1]+r*Math.sin(el),tg[2]+r*Math.cos(el)*Math.sin(az)];
+  p[1]=Math.max(p[1],floorY);cam.pos=p;cam.target=tg;st.dist=r;
+  const f=v3.norm(v3.sub(tg,p)),rr=v3.norm(v3.cross(f,[0,1,0])),uu=v3.cross(rr,f);basis={r:rr,u:uu};};
+ st.film=film;st.free=()=>setMode('free');return st;}
+const orbit=makeOrbit($('c'),{minZoom:.35,maxZoom:2.2,floorY:BASE+.3,onMode:m=>{drift=m==='film';$('bMode').textContent=m==='film'?'Film':'Free';},
+ film:{dur:48,keys:[[0,0,0,1],[12,.2,.04,.92],[24,-.14,-.02,1.05],[36,-.24,.06,.95,[0,.05,0]],[48,0,0,1]]}});
+/* each frame starts from the base pose (plus a slow breathing drift while in film mode), then the orbit is applied on top */
+function frameCam(dt){if(drift)T+=dt;const k=Math.sin(T*.13),k2=Math.sin(T*.09+1);
+ cam.pos=[CAM.pos[0]+.05*k,CAM.pos[1]+.02*k2,CAM.pos[2]];cam.target=CAM.tgt.slice();}
+
+/* ---------- HUD: camera mode, pause, quality (the shell's buttons) ---------- */
+$('top').textContent='Film: automatic camera   Drag: orbit   Pinch/scroll: zoom   Double-tap: Film';
+$('bMode').textContent='Film';$('bMode').onclick=()=>{if(orbit.mode==='film')orbit.free();else orbit.film();};
+$('bTime').textContent='Pause';let paused=false;$('bTime').onclick=()=>{paused=!paused;eng.pause(paused);$('bTime').textContent=paused?'Play':'Pause';};
+let qi=0;const QM=['auto',0,1,2],QN=['Auto','Low','Med','High'];
+$('bQ').textContent='Auto';$('bQ').onclick=()=>{qi=(qi+1)%4;eng.setQuality(QM[qi]);$('bQ').textContent=QN[qi];};
+$('bSnd').style.display='none';
+eng.start(dt=>{frameCam(dt);orbit.apply(cam,dt);});
+if(Q.has('q')){qi=+Q.get('q')+1;eng.setQuality(+Q.get('q'));$('bQ').textContent=QN[qi];}
 eng.frozen=Q.has('freeze');window.__eng=eng;
 })();
