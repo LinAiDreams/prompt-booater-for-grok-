@@ -54,13 +54,13 @@ const lerp3=(a,b,s)=>[a[0]+(b[0]-a[0])*s,a[1]+(b[1]-a[1])*s,a[2]+(b[2]-a[2])*s];
 eng.setFog({density:.004,falloff:.04,horizon:[1e6,2e6],rayleigh:0,mie:0,g:.76});
 eng.setClouds({coverage:0});
 eng.setTimeOfDay(-30,200,0);
-eng.setPost({tone:'agx',exposure:1.5,look:[1,1],saturation:1.08,curve:.22,bloom:.35,threshold:.9,knee:.5,grain:.02,chromatic:.003,vignette:.45,dofMaxCoC:10});
+eng.setPost({tone:'agx',exposure:1.5,look:[1,1],saturation:1.08,curve:.22,bloom:.2,threshold:.9,knee:.5,grain:.02,chromatic:.003,vignette:.45,dofMaxCoC:10});
 cam.fstop=2.8;cam.bokehScale=2;cam.shutterAngle=180;
 eng.addObject({m:eng.addMesh(place(genBox(900,.4,900),{mid:[0,-.2,0]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.022,.022,.026],m:0,r:.5,wet:.5}});
 eng.addObject({m:eng.addMesh(place(genBox(44,.02,.2),{mid:[26,.01,0]})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.7,.7,.68],m:0,r:.6}});
-const flood=eng.addLight({type:'spot',pos:[-40,46,40],dir:[.6,-.6,-.5],color:[1,.96,.9],intensity:900,range:200,angle:.34,inner:.22});
+const flood=eng.addLight({type:'spot',pos:[-40,46,40],dir:[.6,-.6,-.5],color:[1,.96,.9],intensity:500,range:200,angle:.34,inner:.22});
 flood.dir=v3.norm(v3.sub([14,6,-2],flood.pos));
-eng.addLight({type:'point',pos:[18,14,-16],color:[1,.1,.05],intensity:9,range:60});
+const pool=eng.addLight({type:'spot',pos:[57,40,-5],dir:[0,-1,0],color:[1,.97,.92],intensity:250,range:90,angle:.22,inner:.15});
 
 /* ---------- the ramp: a circular arc of radius R, from horizontal on the ground up to 60 degrees; steel frame underneath ---------- */
 const R=24,PHI=Math.PI/3,W=4.4,HALF=W/2;
@@ -68,10 +68,10 @@ const curve=ph=>({p:[R*Math.sin(ph),R*(1-Math.cos(ph)),0],T:[Math.cos(ph),Math.s
 eng.addObject({m:eng.addMesh(sweep(56,4,(s,w)=>{const c=curve(s*PHI);return {p:[c.p[0],c.p[1],(w-.5)*W],n:c.N};})),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.34,.34,.35],m:0,r:.6,wet:.4}});
 /* red LED edge strips along both kerbs */
 for(const z of [-HALF,HALF]){const pts=[];for(let k=0;k<=40;k++){const c=curve(k/40*PHI);pts.push([c.p[0]+c.N[0]*.06,c.p[1]+c.N[1]*.06,z]);}
- eng.addRibbon({points:pts,width:.09,color:[1,.12,.06],intensity:2.2,taper:false});}
+ eng.addRibbon({points:pts,width:.09,color:[1,.12,.06],intensity:1.6,taper:false});}
 /* steel frame under the outer side of the ramp */
 const steel=[],A=(k,z)=>{const c=curve(k/6*PHI);return [c.p[0]-c.N[0]*.6,c.p[1]-c.N[1]*.6,z];};
-for(let k=0;k<=6;k++){for(const z of [-HALF*.9,HALF*.9]){const a=A(k,z);if(a[1]>.3)steel.push(tube([a[0],0,z],a,.12));}
+for(let k=0;k<=6;k++){for(const z of [-HALF*.9,HALF*.9]){const a=A(k,z);if(a[1]>.3)steel.push(tube([a[0],0,z],a,.16));}
  if(k>=2)steel.push(tube(A(k,-HALF*.9),A(k,HALF*.9),.1));
  if(k<6)for(const z of [-HALF*.9,HALF*.9])steel.push(tube(A(k,z),A(k+1,z),.08));}
 eng.addObject({m:eng.addMesh(mergeG(steel)),p:[0,0,0],s:1,rot:[0,0,0],mat:{a:[.12,.12,.13],m:.8,r:.4}});
@@ -125,7 +125,7 @@ function shot(T){
  if(T<14){const c=carPose(T).pos;return {pos:[36,2.4,14],tgt:v3.add(c,[0,1,0]),fov:44,focus:c};}
  if(T<22){const s=(T-14)/8;return {pos:lerp3([30,46,40],[26,58,30],s),tgt:[30,0,-2],fov:50,focus:[30,0,-2]};}
  if(T<29){const s=(T-22)/7;return {pos:lerp3([-10,1.2,22],[-8,1.6,20],s),tgt:[10,9,0],fov:46,focus:[10,9,0]};}
- if(T<37){const e=carPose(TSTOP).pos,a=(T-29)*.5;return {pos:[e[0]+8*Math.cos(a),2.2,e[2]+8*Math.sin(a)],tgt:v3.add(e,[0,.8,0]),fov:40,focus:e};}
+ if(T<37){const a=(T-29)*.5,m=[32,2,-5];return {pos:[m[0]+36*Math.cos(a),32,m[2]+36*Math.sin(a)],tgt:m,fov:46,focus:m};}
  const s=Math.min((T-37)/9,1);return {pos:lerp3([44,12,46],[70,22,80],s),tgt:[22,8,0],fov:46,focus:[22,8,0]};}
 
 /* ---------- HUD and the viewer's orbit (drag, pinch, wheel; double-tap or Film returns) ---------- */
